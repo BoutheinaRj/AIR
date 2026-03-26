@@ -44,6 +44,38 @@ const recruiterSchema = new mongoose.Schema(
       enum: ['starter', 'pro'],
       default: 'starter',
     },
+    profileImage: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    language: {
+      type: String,
+      enum: ['fr', 'en'],
+      default: 'fr',
+    },
+    timezone: {
+      type: String,
+      default: 'Africa/Tunis',
+      trim: true,
+    },
+    dateFormat: {
+      type: String,
+      enum: ['dd/mm/yyyy', 'mm/dd/yyyy', 'yyyy-mm-dd'],
+      default: 'dd/mm/yyyy',
+    },
+    notifyNewCandidate: {
+      type: Boolean,
+      default: true,
+    },
+    notifyInterviewReminder: {
+      type: Boolean,
+      default: true,
+    },
+    notifyWeeklyReport: {
+      type: Boolean,
+      default: false,
+    },
     passwordHash: {
       type: String,
       required: true,

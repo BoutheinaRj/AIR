@@ -352,6 +352,13 @@ app.post('/api/recruiters/register', async (req, res) => {
       country,
       companySize,
       plan: plan || 'starter',
+      profileImage: '',
+      language: 'fr',
+      timezone: 'Africa/Tunis',
+      dateFormat: 'dd/mm/yyyy',
+      notifyNewCandidate: true,
+      notifyInterviewReminder: true,
+      notifyWeeklyReport: false,
       passwordHash,
     });
 
@@ -368,6 +375,14 @@ app.post('/api/recruiters/register', async (req, res) => {
         country: recruiter.country,
         companySize: recruiter.companySize,
         plan: recruiter.plan,
+        profileImage: recruiter.profileImage || '',
+        registeredAt: recruiter.createdAt,
+        language: recruiter.language || 'fr',
+        timezone: recruiter.timezone || 'Africa/Tunis',
+        dateFormat: recruiter.dateFormat || 'dd/mm/yyyy',
+        notifyNewCandidate: recruiter.notifyNewCandidate !== false,
+        notifyInterviewReminder: recruiter.notifyInterviewReminder !== false,
+        notifyWeeklyReport: Boolean(recruiter.notifyWeeklyReport),
       },
     });
   } catch (error) {
@@ -419,12 +434,183 @@ app.post('/api/recruiters/login', async (req, res) => {
         country: recruiter.country,
         companySize: recruiter.companySize,
         plan: recruiter.plan,
+        profileImage: recruiter.profileImage || '',
+        registeredAt: recruiter.createdAt,
+        language: recruiter.language || 'fr',
+        timezone: recruiter.timezone || 'Africa/Tunis',
+        dateFormat: recruiter.dateFormat || 'dd/mm/yyyy',
+        notifyNewCandidate: recruiter.notifyNewCandidate !== false,
+        notifyInterviewReminder: recruiter.notifyInterviewReminder !== false,
+        notifyWeeklyReport: Boolean(recruiter.notifyWeeklyReport),
       },
     });
   } catch (error) {
     return res.status(500).json({
       success: false,
       message: 'Erreur serveur pendant la connexion.',
+      error: error.message,
+    });
+  }
+});
+
+app.put('/api/recruiters/:recruiterId', async (req, res) => {
+  try {
+    const { recruiterId } = req.params;
+    const {
+      firstName,
+      lastName,
+      email,
+      company,
+      sector,
+      country,
+      companySize,
+      plan,
+      profileImage,
+      language,
+      timezone,
+      dateFormat,
+      notifyNewCandidate,
+      notifyInterviewReminder,
+      notifyWeeklyReport,
+    } = req.body || {};
+
+    if (!recruiterId) {
+      return res.status(400).json({
+        success: false,
+        message: 'recruiterId est requis.',
+      });
+    }
+
+    const recruiter = await Recruiter.findById(recruiterId);
+    if (!recruiter) {
+      return res.status(404).json({
+        success: false,
+        message: 'Recruteur introuvable.',
+      });
+    }
+
+    if (typeof email === 'string' && email.trim()) {
+      const normalizedEmail = email.trim().toLowerCase();
+      const existingRecruiter = await Recruiter.findOne({ email: normalizedEmail, _id: { $ne: recruiterId } });
+      if (existingRecruiter) {
+        return res.status(409).json({
+          success: false,
+          message: 'Un autre compte utilise deja cet email.',
+        });
+      }
+      recruiter.email = normalizedEmail;
+    }
+
+    const imageValue = typeof profileImage === 'string' ? profileImage.trim() : '';
+    if (imageValue && imageValue.length > 2000000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Image de profil trop volumineuse.',
+      });
+    }
+
+    if (typeof firstName === 'string' && firstName.trim()) recruiter.firstName = firstName.trim();
+    if (typeof lastName === 'string' && lastName.trim()) recruiter.lastName = lastName.trim();
+    if (typeof company === 'string' && company.trim()) recruiter.company = company.trim();
+    if (typeof sector === 'string' && sector.trim()) recruiter.sector = sector.trim();
+    if (typeof country === 'string' && country.trim()) recruiter.country = country.trim();
+    if (typeof companySize === 'string' && companySize.trim()) recruiter.companySize = companySize.trim();
+    if (plan === 'starter' || plan === 'pro') recruiter.plan = plan;
+    if (typeof profileImage === 'string') recruiter.profileImage = imageValue;
+    if (language === 'fr' || language === 'en') recruiter.language = language;
+    if (typeof timezone === 'string' && timezone.trim()) recruiter.timezone = timezone.trim();
+    if (dateFormat === 'dd/mm/yyyy' || dateFormat === 'mm/dd/yyyy' || dateFormat === 'yyyy-mm-dd') recruiter.dateFormat = dateFormat;
+    if (typeof notifyNewCandidate === 'boolean') recruiter.notifyNewCandidate = notifyNewCandidate;
+    if (typeof notifyInterviewReminder === 'boolean') recruiter.notifyInterviewReminder = notifyInterviewReminder;
+    if (typeof notifyWeeklyReport === 'boolean') recruiter.notifyWeeklyReport = notifyWeeklyReport;
+
+    await recruiter.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profil recruteur mis a jour avec succes.',
+      recruiter: {
+        id: recruiter._id,
+        firstName: recruiter.firstName,
+        lastName: recruiter.lastName,
+        email: recruiter.email,
+        company: recruiter.company,
+        sector: recruiter.sector,
+        country: recruiter.country,
+        companySize: recruiter.companySize,
+        plan: recruiter.plan,
+        profileImage: recruiter.profileImage || '',
+        registeredAt: recruiter.createdAt,
+        language: recruiter.language || 'fr',
+        timezone: recruiter.timezone || 'Africa/Tunis',
+        dateFormat: recruiter.dateFormat || 'dd/mm/yyyy',
+        notifyNewCandidate: recruiter.notifyNewCandidate !== false,
+        notifyInterviewReminder: recruiter.notifyInterviewReminder !== false,
+        notifyWeeklyReport: Boolean(recruiter.notifyWeeklyReport),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant la mise a jour du profil recruteur.',
+      error: error.message,
+    });
+  }
+});
+
+app.put('/api/recruiters/:recruiterId/password', async (req, res) => {
+  try {
+    const { recruiterId } = req.params;
+    const { currentPassword, newPassword } = req.body || {};
+
+    if (!recruiterId) {
+      return res.status(400).json({
+        success: false,
+        message: 'recruiterId est requis.',
+      });
+    }
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mot de passe actuel et nouveau mot de passe sont requis.',
+      });
+    }
+
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'Le nouveau mot de passe doit contenir au moins 8 caracteres.',
+      });
+    }
+
+    const recruiter = await Recruiter.findById(recruiterId);
+    if (!recruiter) {
+      return res.status(404).json({
+        success: false,
+        message: 'Recruteur introuvable.',
+      });
+    }
+
+    const isCurrentValid = await bcrypt.compare(String(currentPassword), recruiter.passwordHash);
+    if (!isCurrentValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Mot de passe actuel incorrect.',
+      });
+    }
+
+    recruiter.passwordHash = await bcrypt.hash(String(newPassword), 10);
+    await recruiter.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Mot de passe mis a jour avec succes.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant la mise a jour du mot de passe.',
       error: error.message,
     });
   }
@@ -1594,6 +1780,45 @@ app.get('/api/candidacies/:candidateId', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Erreur serveur.',
+      error: error.message,
+    });
+  }
+});
+
+app.get('/api/candidacies/recruiter/:recruiterId', async (req, res) => {
+  try {
+    const { recruiterId } = req.params;
+
+    if (!recruiterId) {
+      return res.status(400).json({
+        success: false,
+        message: 'recruiterId est requis.',
+      });
+    }
+
+    const offers = await JobOffer.find({ recruiterId }).select('_id title location workMode contractType salary createdAt');
+    const offerIds = offers.map((offer) => offer._id);
+
+    if (offerIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        candidacies: [],
+      });
+    }
+
+    const candidacies = await Candidacy.find({ jobOfferId: { $in: offerIds } })
+      .populate('candidateId', 'firstName lastName email professionalTitle sector experienceLevel country portfolioUrl createdAt')
+      .populate('jobOfferId', 'title location workMode contractType salary')
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      candidacies,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant la recuperation des candidatures recruteur.',
       error: error.message,
     });
   }

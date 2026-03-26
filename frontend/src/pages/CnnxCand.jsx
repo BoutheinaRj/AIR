@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { assets } from '../assets/assets'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
@@ -57,14 +58,6 @@ function CnnxCand() {
 
 	const updateLoginField = (field, value) => {
 		setLoginData((prev) => ({ ...prev, [field]: value }))
-	}
-
-	const goBack = () => {
-		if (window.history.length > 1) {
-			navigate(-1)
-			return
-		}
-		navigate('/')
 	}
 
 	const handleLoginSubmit = async (e) => {
@@ -155,17 +148,12 @@ function CnnxCand() {
 	}
 
 	return (
-		<section className='relative w-full min-h-[84vh] bg-gradient-to-b from-[#eef8ff] via-[#004167] to-[#ffffff] py-8 sm:py-12'>
-			<div className='mx-auto max-w-6xl mb-3 px-1'>
-				<button
-					type='button'
-					onClick={goBack}
-					className='inline-flex items-center gap-2 rounded-full border border-cyan-500 bg-white/90 px-4 py-2 text-sm font-semibold text-[#0a5f88] shadow-sm hover:bg-cyan-50 transition-colors'
-				>
-					<span aria-hidden='true'>←</span>
-					Retour
+		<section className='relative w-full min-h-[84vh] bg-gradient-to-b from-[#eef8ff] via-[#004167] to-[#ffffff] py-4 sm:py-6'>
+			<header className='mx-auto mb-2 flex max-w-6xl items-center justify-center px-4'>
+				<button type='button' onClick={() => navigate('/')} className='cursor-pointer' aria-label="Aller a l'accueil">
+					<img src={assets.logo} className='w-32 sm:w-36' alt='Logo' />
 				</button>
-			</div>
+			</header>
 			<div className='mx-auto max-w-6xl rounded-3xl overflow-hidden shadow-[0_30px_80px_rgba(10,12,21,0.25)] border border-[#101522]/10 bg-white'>
 				<div className='grid lg:grid-cols-[1.02fr_1fr]'>
 					<div className='relative bg-gradient-to-br from-[#06213a] via-[#0a3356] to-[#0a4c73] p-8 sm:p-10 text-white overflow-hidden'>

@@ -290,7 +290,10 @@ Tests de stress, d'humeur et de personnalité pour mieux vous connaître et rass
           <p style={{ fontFamily: "'Jost', sans-serif" }} className='mx-auto max-w-2xl text-base sm:text-lg text-slate-200 mb-8 font-light'>
             Rejoignez les professionnels qui font confiance à A.I.R pour trouver les meilleurs talents et se faire découvrir.
           </p>
-          <button className='inline-flex items-center justify-center px-8 sm:px-9 py-2.5 rounded-full bg-gradient-to-r from-[#08d2de] via-[#0dbfd7] to-[#4f66ff] text-white font-semibold text-lg shadow-[0_10px_26px_rgba(8,197,217,0.35)] hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(8,197,217,0.45)] transition-all duration-300'>
+          <button
+            onClick={() => navigate('/demarrer')}
+            className='inline-flex items-center justify-center px-8 sm:px-9 py-2.5 rounded-full bg-gradient-to-r from-[#08d2de] via-[#0dbfd7] to-[#4f66ff] text-white font-semibold text-lg shadow-[0_10px_26px_rgba(8,197,217,0.35)] hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(8,197,217,0.45)] transition-all duration-300'
+          >
             Démarrer gratuitement
           </button>
         </div>

@@ -12,6 +12,7 @@ import CandidateCVBuilder from './pages/CandidateCVBuilder.jsx'
 import CandidateCVBuildStep1 from './pages/CandidateCVBuildStep1.jsx'
 import CandidateCVBuildReview from './pages/CandidateCVBuildReview.jsx'
 import DashboardCand from './pages/DashboardCand.jsx'
+import ChooseRole from './pages/ChooseRole.jsx'
 import './index.css';
 
 
@@ -33,11 +34,12 @@ function App() {
 
   return (
     <div className='min-h-screen flex flex-col'>
-    {!isDashboardPage && <Navbar />}
+    {!isDashboardPage && !isAuthPage && <Navbar />}
     <main className={`flex-1 min-h-0 ${contentPadding}`}>
     <Routes>
       <Route path='/' element={<Home/>}/>
       <Route path='/a-propos' element={<Apropos/>}/>
+      <Route path='/demarrer' element={<ChooseRole/>}/>
       <Route path='/connecter' element={<CnnxCand/>}/>
       <Route path='/connexion' element={<CnnxRec/>}/>
       <Route path='/cnnx' element={<CnnxRec/>}/>
