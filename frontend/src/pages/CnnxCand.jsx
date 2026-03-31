@@ -81,6 +81,11 @@ function CnnxCand() {
 			}
 
 			localStorage.setItem('airCandidate', JSON.stringify(data.candidate))
+			if (data?.sessionId) {
+				localStorage.setItem('airCandidateSessionId', String(data.sessionId))
+			} else {
+				localStorage.removeItem('airCandidateSessionId')
+			}
 
 			let nextRoute = '/EspaceCandidat'
 			try {

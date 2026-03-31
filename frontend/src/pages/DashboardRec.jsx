@@ -17,11 +17,13 @@ const emptyOfferForm = {
 
 const emptyInterviewForm = {
 	offerId: '',
+	candidateId: '',
 	candidateName: '',
 	candidateEmail: '',
 	scheduledAt: '',
 	mode: 'Visio',
 	meetingLink: '',
+	location: '',
 	notes: '',
 }
 
@@ -569,13 +571,14 @@ function DashboardRec() {
 		}
 	}
 
-	const handlePrefillInterview = (offerId, candidateName, candidateEmail) => {
+	const handlePrefillInterview = (offerId, candidateId, candidateName, candidateEmail) => {
 		setSelectedView('interviews')
 		setInterviewMessage('')
 		setInterviewError('')
 		setInterviewForm((prev) => ({
 			...prev,
 			offerId: offerId || prev.offerId,
+			candidateId: candidateId || '',
 			candidateName: candidateName || '',
 			candidateEmail: candidateEmail || '',
 		}))
@@ -589,7 +592,7 @@ function DashboardRec() {
 		setInterviewForm(emptyInterviewForm)
 	}
 
-	const handleScheduleInterview = (e) => {
+	const handleScheduleInterview = async (e) => {
 		e.preventDefault()
 		setInterviewError('')
 		setInterviewMessage('')
@@ -600,9 +603,23 @@ function DashboardRec() {
 		}
 
 		const selectedOffer = offers.find((offer) => offer._id === interviewForm.offerId)
+		const isOnsite = interviewForm.mode === 'Présentiel'
+		if (isOnsite && !String(interviewForm.location || '').trim()) {
+			setInterviewError("La localisation est requise pour un entretien en présentiel.")
+			return
+		}
+		if (!isOnsite && interviewForm.meetingLink && !/^https?:\/\//i.test(interviewForm.meetingLink.trim())) {
+			setInterviewError('Le lien de réunion doit commencer par http(s)://')
+			return
+		}
+		if (!interviewForm.candidateId) {
+			setInterviewError("Impossible d'identifier le candidat (candidateId manquant).")
+			return
+		}
 		const newInterview = {
 			id: `${Date.now()}`,
 			offerId: interviewForm.offerId,
+			candidateId: interviewForm.candidateId || '',
 			offerTitle: selectedOffer?.title || 'Offre',
 			candidateName: interviewForm.candidateName.trim(),
 			candidateEmail: interviewForm.candidateEmail.trim(),
@@ -613,9 +630,48 @@ function DashboardRec() {
 			status: 'Planifie',
 		}
 
-		setInterviews((prev) => [newInterview, ...prev])
-		setInterviewMessage('Entretien planifie avec succes.')
-		resetInterviewForm()
+		try {
+			const res = await fetch(`${API_BASE}/interviews`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					candidateId: interviewForm.candidateId,
+					recruiterId: recruiter?.id || recruiter?._id,
+					jobOfferId: interviewForm.offerId,
+					candidateName: interviewForm.candidateName.trim(),
+					candidateEmail: interviewForm.candidateEmail.trim(),
+					scheduledAt: interviewForm.scheduledAt,
+					mode: interviewForm.mode,
+					meetingLink: interviewForm.meetingLink.trim(),
+					location: interviewForm.location.trim(),
+					notes: interviewForm.notes.trim(),
+				}),
+			})
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) {
+				setInterviewError(data?.message || "Impossible d'enregistrer l'entretien.")
+				return
+			}
+
+			const savedInterview = data?.interview
+			const savedScheduledAt = savedInterview?.scheduledAt ? new Date(savedInterview.scheduledAt).toISOString() : interviewForm.scheduledAt
+			const nextInterview = {
+				...newInterview,
+				id: savedInterview?._id || newInterview.id,
+				scheduledAt: savedScheduledAt,
+				mode: savedInterview?.mode || interviewForm.mode,
+				meetingLink: savedInterview?.meetingLink || interviewForm.meetingLink.trim(),
+				location: savedInterview?.location || interviewForm.location.trim(),
+				notes: savedInterview?.notes || interviewForm.notes.trim(),
+				status: savedInterview?.status || 'Planifie',
+			}
+
+			setInterviews((prev) => [nextInterview, ...prev])
+			setInterviewMessage('Entretien planifie avec succes. Le candidat a été notifié.')
+			resetInterviewForm()
+		} catch (error) {
+			setInterviewError('Serveur indisponible. Verifiez que le backend tourne.')
+		}
 	}
 
 	const handleDeleteInterview = (interviewId) => {
@@ -1247,7 +1303,7 @@ function DashboardRec() {
 																	<p className='text-sm font-bold text-[#103b62]'>{fullName}</p>
 																	<button
 																		type='button'
-																		onClick={() => handlePrefillInterview(group.offerId, fullName, cand.email || '')}
+																		onClick={() => handlePrefillInterview(group.offerId, candidateId, fullName, cand.email || '')}
 																		className='rounded-md border border-[#0a7aa2] bg-white px-2 py-1 text-xs font-semibold text-[#0a5f88] transition hover:bg-[#ebfaff]'
 																	>
 																		Donner rendez-vous
@@ -1367,13 +1423,13 @@ function DashboardRec() {
 														onChange={(e) => updateInterviewField('mode', e.target.value)}
 													>
 														<option value='Visio'>Visio</option>
-														<option value='Presentiel'>Presentiel</option>
+														<option value='Présentiel'>Présentiel</option>
 													</select>
 												</div>
 											</div>
 
 											<div>
-												<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Lien reunion (optionnel)</label>
+												<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Lien reunion {interviewForm.mode === 'Visio' ? '(recommande)' : '(optionnel)'}</label>
 												<input
 													className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-500'
 													placeholder='https://meet...'
@@ -1381,6 +1437,18 @@ function DashboardRec() {
 													onChange={(e) => updateInterviewField('meetingLink', e.target.value)}
 												/>
 											</div>
+
+											{interviewForm.mode === 'Présentiel' ? (
+												<div>
+													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Localisation (obligatoire)</label>
+													<input
+														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-500'
+														placeholder='Adresse / ville / bureau...'
+														value={interviewForm.location}
+														onChange={(e) => updateInterviewField('location', e.target.value)}
+													/>
+												</div>
+											) : null}
 
 											<div>
 												<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Notes</label>

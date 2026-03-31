@@ -1,6 +1,8 @@
-const DRAFT_KEY = 'airCandidateCvDraft'
+const LEGACY_DRAFT_KEY = 'airCandidateCvDraft'
+const DRAFT_KEY_PREFIX = 'airCandidateCvDraft:'
 
 const emptyDraft = {
+	ownerCandidateId: '',
 	personal: {
 		firstName: '',
 		lastName: '',
@@ -35,45 +37,83 @@ const emptyDraft = {
 	savedAt: '',
 }
 
-export function loadCvDraft() {
-	try {
-		const raw = localStorage.getItem(DRAFT_KEY)
-		if (!raw) return { ...emptyDraft }
-		const parsed = JSON.parse(raw)
-		if (!parsed || typeof parsed !== 'object') return { ...emptyDraft }
-		return {
-			...emptyDraft,
-			...parsed,
-			personal: { ...emptyDraft.personal, ...(parsed.personal || {}) },
-			content: { ...emptyDraft.content, ...(parsed.content || {}) },
-		}
-	} catch {
-		return { ...emptyDraft }
+function normalizeCandidateId(candidateId) {
+	if (candidateId === null || candidateId === undefined) return ''
+	return String(candidateId).trim()
+}
+
+export function getCvDraftKey(candidateId) {
+	const id = normalizeCandidateId(candidateId)
+	return id ? `${DRAFT_KEY_PREFIX}${id}` : LEGACY_DRAFT_KEY
+}
+
+function normalizeDraft(parsed) {
+	if (!parsed || typeof parsed !== 'object') return { ...emptyDraft }
+	return {
+		...emptyDraft,
+		...parsed,
+		personal: { ...emptyDraft.personal, ...(parsed.personal || {}) },
+		content: { ...emptyDraft.content, ...(parsed.content || {}) },
 	}
 }
 
-export function saveCvDraft(nextDraft) {
+function safeReadDraft(key) {
 	try {
+		const raw = localStorage.getItem(key)
+		if (!raw) return null
+		return normalizeDraft(JSON.parse(raw))
+	} catch {
+		return null
+	}
+}
+
+
+export function loadCvDraft(candidateId) {
+	const id = normalizeCandidateId(candidateId)
+	const key = getCvDraftKey(id)
+
+	const loaded = safeReadDraft(key)
+	if (loaded) {
+		if (id && loaded.ownerCandidateId && loaded.ownerCandidateId !== id) return { ...emptyDraft }
+		return loaded
+	}
+
+	// Backward compatibility: never auto-load legacy drafts for a known candidate,
+	// to avoid leaking data across users on shared browsers.
+	if (id) return { ...emptyDraft }
+
+	return safeReadDraft(LEGACY_DRAFT_KEY) || { ...emptyDraft }
+}
+
+export function saveCvDraft(candidateId, nextDraft) {
+	try {
+		const id = normalizeCandidateId(candidateId)
+		const key = getCvDraftKey(id)
 		const payload = {
-			...loadCvDraft(),
+			...loadCvDraft(id),
 			...nextDraft,
+			ownerCandidateId: id || (nextDraft?.ownerCandidateId ? normalizeCandidateId(nextDraft.ownerCandidateId) : ''),
 			savedAt: new Date().toISOString(),
 		}
-		localStorage.setItem(DRAFT_KEY, JSON.stringify(payload))
+		localStorage.setItem(key, JSON.stringify(payload))
 		return payload
 	} catch {
 		return null
 	}
 }
 
-export function clearCvDraft() {
+export function clearCvDraft(candidateId) {
 	try {
-		localStorage.removeItem(DRAFT_KEY)
+		localStorage.removeItem(getCvDraftKey(candidateId))
 	} catch {
 		// ignore
 	}
 }
 
-export function getCvDraftKey() {
-	return DRAFT_KEY
+export function clearLegacyCvDraft() {
+	try {
+		localStorage.removeItem(LEGACY_DRAFT_KEY)
+	} catch {
+		// ignore
+	}
 }

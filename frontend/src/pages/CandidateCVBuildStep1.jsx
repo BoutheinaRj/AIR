@@ -3,11 +3,23 @@ import { useNavigate } from 'react-router-dom'
 import CandidateHeader from '../components/CandidateHeader'
 import StepProgress from '../components/StepProgress'
 import { assets } from '../assets/assets'
-import { loadCvDraft, saveCvDraft } from '../utils/cvDraft'
+import { clearCvDraft, clearLegacyCvDraft, loadCvDraft, saveCvDraft } from '../utils/cvDraft'
+
+function getStoredCandidateId() {
+	try {
+		const raw = localStorage.getItem('airCandidate')
+		if (!raw) return ''
+		const candidate = JSON.parse(raw)
+		return String(candidate?.id || candidate?._id || '').trim()
+	} catch {
+		return ''
+	}
+}
 
 function CandidateCVBuildStep1() {
 	const navigate = useNavigate()
-	const [draft, setDraft] = useState(() => loadCvDraft())
+	const [candidateId] = useState(() => getStoredCandidateId())
+	const [draft, setDraft] = useState(() => loadCvDraft(candidateId || '__no_candidate__'))
 	const [error, setError] = useState('')
 	const [saving, setSaving] = useState(false)
 	const [savedAt, setSavedAt] = useState('')
@@ -15,6 +27,11 @@ function CandidateCVBuildStep1() {
 	useEffect(() => {
 		const rawCandidate = localStorage.getItem('airCandidate')
 		if (!rawCandidate) {
+			navigate('/connecter')
+			return
+		}
+		if (!candidateId) {
+			localStorage.removeItem('airCandidate')
 			navigate('/connecter')
 			return
 		}
@@ -43,17 +60,18 @@ function CandidateCVBuildStep1() {
 		} catch {
 			// ignore
 		}
-	}, [navigate])
+	}, [navigate, candidateId])
 
 	useEffect(() => {
+		if (!candidateId) return
 		setSaving(true)
 		const timer = setTimeout(() => {
-			const saved = saveCvDraft({ personal: draft.personal, content: draft.content })
+			const saved = saveCvDraft(candidateId, { personal: draft.personal, content: draft.content })
 			setSavedAt(saved?.savedAt || '')
 			setSaving(false)
 		}, 450)
 		return () => clearTimeout(timer)
-	}, [draft.personal, draft.content])
+	}, [draft.personal, draft.content, candidateId])
 
 	const steps = useMemo(() => ['Informations', 'Parcours', 'Finaliser'], [])
 
@@ -142,6 +160,8 @@ function CandidateCVBuildStep1() {
 			<CandidateHeader
 				onLogoClick={() => navigate('/')}
 				onLogout={() => {
+					clearCvDraft(candidateId)
+					clearLegacyCvDraft()
 					localStorage.removeItem('airCandidate')
 					navigate('/')
 				}}

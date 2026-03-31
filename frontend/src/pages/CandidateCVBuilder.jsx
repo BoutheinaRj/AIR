@@ -3,11 +3,23 @@ import { useNavigate } from 'react-router-dom'
 import CandidateHeader from '../components/CandidateHeader'
 import StepProgress from '../components/StepProgress'
 import { assets } from '../assets/assets'
-import { clearCvDraft, loadCvDraft, saveCvDraft } from '../utils/cvDraft'
+import { clearCvDraft, clearLegacyCvDraft, loadCvDraft, saveCvDraft } from '../utils/cvDraft'
+
+function getStoredCandidateId() {
+	try {
+		const raw = localStorage.getItem('airCandidate')
+		if (!raw) return ''
+		const candidate = JSON.parse(raw)
+		return String(candidate?.id || candidate?._id || '').trim()
+	} catch {
+		return ''
+	}
+}
 
 function CandidateCVBuilder() {
 	const navigate = useNavigate()
-	const [draft, setDraft] = useState(() => loadCvDraft())
+	const [candidateId] = useState(() => getStoredCandidateId())
+	const [draft, setDraft] = useState(() => loadCvDraft(candidateId || '__no_candidate__'))
 	const [lastSavedAt, setLastSavedAt] = useState(null)
 	const [restored, setRestored] = useState(false)
 
@@ -17,8 +29,13 @@ function CandidateCVBuilder() {
 			navigate('/connecter')
 			return
 		}
+		if (!candidateId) {
+			localStorage.removeItem('airCandidate')
+			navigate('/connecter')
+			return
+		}
 
-		const loaded = loadCvDraft()
+		const loaded = loadCvDraft(candidateId)
 		const hasContent = Object.values(loaded.content || {}).some((v) => {
 			if (Array.isArray(v)) return v.length > 0
 			return String(v || '').trim() !== ''
@@ -28,19 +45,20 @@ function CandidateCVBuilder() {
 			if (loaded.savedAt) setLastSavedAt(new Date(loaded.savedAt))
 			setRestored(true)
 		}
-	}, [navigate])
+	}, [navigate, candidateId])
 
 	useEffect(() => {
+		if (!candidateId) return
 		const timer = setTimeout(() => {
 			try {
-				const saved = saveCvDraft({ content: draft.content })
+				const saved = saveCvDraft(candidateId, { personal: draft.personal, content: draft.content })
 				if (saved?.savedAt) setLastSavedAt(new Date(saved.savedAt))
 			} catch {
 				// ignore
 			}
 		}, 450)
 		return () => clearTimeout(timer)
-	}, [draft.content])
+	}, [draft.personal, draft.content, candidateId])
 
 	const savedLabel = useMemo(() => {
 		if (!lastSavedAt) return ''
@@ -51,14 +69,13 @@ function CandidateCVBuilder() {
 
 	const steps = useMemo(() => ['Informations', 'Parcours', 'Finaliser'], [])
 	const step1Ratio = useMemo(() => {
-		const loaded = loadCvDraft()
 		const required = ['firstName', 'lastName', 'professionalTitle', 'email', 'phone', 'city', 'country', 'birthDate', 'nationality']
 		let ok = 0
 		for (const key of required) {
-			if (String(loaded.personal?.[key] || '').trim()) ok += 1
+			if (String(draft.personal?.[key] || '').trim()) ok += 1
 		}
 		return required.length ? ok / required.length : 0
-	}, [])
+	}, [draft.personal])
 	const step2Ratio = useMemo(() => {
 		const checks = [
 			String(draft.content?.professionalSummary || '').trim() !== '',
@@ -183,6 +200,8 @@ function CandidateCVBuilder() {
 			<CandidateHeader
 				onLogoClick={() => navigate('/')}
 				onLogout={() => {
+					clearCvDraft(candidateId)
+					clearLegacyCvDraft()
 					localStorage.removeItem('airCandidate')
 					navigate('/')
 				}}
@@ -586,8 +605,8 @@ function CandidateCVBuilder() {
 									<button
 										type='button'
 										onClick={() => {
-											clearCvDraft()
-											setDraft(loadCvDraft())
+											clearCvDraft(candidateId)
+											setDraft(loadCvDraft(candidateId || '__no_candidate__'))
 											setLastSavedAt(null)
 											setRestored(false)
 										}}

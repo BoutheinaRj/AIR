@@ -3,14 +3,26 @@ import { useNavigate } from 'react-router-dom'
 import CandidateHeader from '../components/CandidateHeader'
 import StepProgress from '../components/StepProgress'
 import { assets } from '../assets/assets'
-import { loadCvDraft } from '../utils/cvDraft'
+import { clearCvDraft, clearLegacyCvDraft, loadCvDraft } from '../utils/cvDraft'
+
+function getStoredCandidateId() {
+	try {
+		const raw = localStorage.getItem('airCandidate')
+		if (!raw) return ''
+		const candidate = JSON.parse(raw)
+		return String(candidate?.id || candidate?._id || '').trim()
+	} catch {
+		return ''
+	}
+}
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const API_ORIGIN = API_BASE.replace(/\/api\/?$/, '')
 
 function CandidateCVBuildReview() {
 	const navigate = useNavigate()
-	const [draft, setDraft] = useState(() => loadCvDraft())
+	const [candidateId] = useState(() => getStoredCandidateId())
+	const [draft, setDraft] = useState(() => loadCvDraft(candidateId || '__no_candidate__'))
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState('')
 	const [success, setSuccess] = useState('')
@@ -23,8 +35,13 @@ function CandidateCVBuildReview() {
 			navigate('/connecter')
 			return
 		}
-		setDraft(loadCvDraft())
-	}, [navigate])
+		if (!candidateId) {
+			localStorage.removeItem('airCandidate')
+			navigate('/connecter')
+			return
+		}
+		setDraft(loadCvDraft(candidateId))
+	}, [navigate, candidateId])
 
 	const steps = useMemo(() => ['Informations', 'Parcours', 'Finaliser'], [])
 
@@ -63,7 +80,8 @@ function CandidateCVBuildReview() {
 				return
 			}
 			const candidate = JSON.parse(rawCandidate)
-			if (!candidate?.id) {
+			const resolvedCandidateId = String(candidate?.id || candidate?._id || '').trim()
+			if (!resolvedCandidateId) {
 				setError('Session invalide. Veuillez vous reconnecter.')
 				return
 			}
@@ -73,7 +91,7 @@ function CandidateCVBuildReview() {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					candidateId: candidate.id,
+					candidateId: resolvedCandidateId,
 					personal: draft.personal,
 					content: draft.content,
 				}),
@@ -137,6 +155,8 @@ function CandidateCVBuildReview() {
 			<CandidateHeader
 				onLogoClick={() => navigate('/')}
 				onLogout={() => {
+					clearCvDraft(candidateId)
+					clearLegacyCvDraft()
 					localStorage.removeItem('airCandidate')
 					navigate('/')
 				}}

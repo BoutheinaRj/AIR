@@ -1,10 +1,157 @@
 /* eslint-disable react/prop-types */
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { assets } from '../assets/assets'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const API_ORIGIN = API_BASE.replace(/\/api\/?$/, '')
+
+const clamp = (n, min, max) => Math.min(max, Math.max(min, n))
+
+const LineAreaChart = ({ data, height = 140 }) => {
+	const width = 560
+	const padding = { top: 12, right: 12, bottom: 24, left: 36 }
+	const points = Array.isArray(data) ? data : []
+	const values = points.map((p) => (Number.isFinite(p?.value) ? p.value : 0))
+	const maxVal = Math.max(1, ...values)
+	const minVal = 0
+
+	const innerW = width - padding.left - padding.right
+	const innerH = height - padding.top - padding.bottom
+	const stepX = points.length > 1 ? innerW / (points.length - 1) : innerW
+
+	const xy = points.map((p, idx) => {
+		const v = Number.isFinite(p?.value) ? p.value : 0
+		const x = padding.left + idx * stepX
+		const y = padding.top + (1 - (v - minVal) / (maxVal - minVal)) * innerH
+		return { x, y, v, label: p?.label || '' }
+	})
+
+	const lineD = xy.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')
+	const areaD = `${lineD} L ${(padding.left + (points.length - 1) * stepX).toFixed(2)} ${(padding.top + innerH).toFixed(2)} L ${padding.left.toFixed(2)} ${(padding.top + innerH).toFixed(2)} Z`
+
+	const ticks = 4
+	const yTicks = Array.from({ length: ticks + 1 }, (_, i) => {
+		const t = i / ticks
+		const v = (1 - t) * maxVal
+		const y = padding.top + t * innerH
+		return { v: Math.round(v * 10) / 10, y }
+	})
+
+	return (
+		<div className='w-full overflow-x-auto'>
+			<svg viewBox={`0 0 ${width} ${height}`} className='w-full min-w-[520px]'>
+				<defs>
+					<linearGradient id='airLineFill' x1='0' y1='0' x2='0' y2='1'>
+						<stop offset='0%' stopColor='#06d5e0' stopOpacity='0.25' />
+						<stop offset='100%' stopColor='#06d5e0' stopOpacity='0.02' />
+					</linearGradient>
+				</defs>
+
+				{yTicks.map((t) => (
+					<g key={`y-${t.y}`}>
+						<line x1={padding.left} y1={t.y} x2={width - padding.right} y2={t.y} stroke='#e2e8f0' strokeWidth='1' />
+						<text x={padding.left - 8} y={t.y + 4} textAnchor='end' fontSize='10' fill='#64748b'>
+							{t.v}
+						</text>
+					</g>
+				))}
+
+				<path d={areaD} fill='url(#airLineFill)' />
+				<path d={lineD} fill='none' stroke='#06d5e0' strokeWidth='2.5' />
+				{xy.map((p) => (
+					<circle key={`pt-${p.x}`} cx={p.x} cy={p.y} r='2.8' fill='#001d3e' stroke='#06d5e0' strokeWidth='1.5' />
+				))}
+
+				{xy.length > 0 ? (
+					<>
+						<text x={padding.left} y={height - 8} fontSize='10' fill='#64748b'>
+							{xy[0].label}
+						</text>
+						<text x={width - padding.right} y={height - 8} textAnchor='end' fontSize='10' fill='#64748b'>
+							{xy.at(-1)?.label || ''}
+						</text>
+					</>
+				) : null}
+			</svg>
+		</div>
+	)
+}
+
+const BarChart = ({ values, labels, height = 140 }) => {
+	const width = 560
+	const padding = { top: 12, right: 12, bottom: 28, left: 28 }
+	const v = Array.isArray(values) ? values.map((x) => (Number.isFinite(x) ? x : 0)) : []
+	const maxVal = Math.max(1, ...v)
+	const innerW = width - padding.left - padding.right
+	const innerH = height - padding.top - padding.bottom
+	const barW = v.length ? innerW / v.length : innerW
+
+	return (
+		<div className='w-full overflow-x-auto'>
+			<svg viewBox={`0 0 ${width} ${height}`} className='w-full min-w-[520px]'>
+				<line x1={padding.left} y1={padding.top + innerH} x2={width - padding.right} y2={padding.top + innerH} stroke='#e2e8f0' strokeWidth='1' />
+				{v.map((val, idx) => {
+					const h = (val / maxVal) * innerH
+					const x = padding.left + idx * barW + barW * 0.15
+					const y = padding.top + innerH - h
+					const w = barW * 0.7
+					const label = Array.isArray(labels) ? labels[idx] : String(idx)
+					return (
+						<g key={`bar-${label}`}>
+							<rect x={x} y={y} width={w} height={h} rx='4' fill={val > 0 ? '#06d5e0' : '#cbd5e1'} opacity={val > 0 ? 0.9 : 0.55} />
+							{idx % 3 === 0 ? (
+								<text x={x + w / 2} y={height - 10} textAnchor='middle' fontSize='10' fill='#64748b'>
+									{label}
+								</text>
+							) : null}
+						</g>
+					)
+				})}
+			</svg>
+		</div>
+	)
+}
+
+const DonutChart = ({ segments, size = 160 }) => {
+	const s = Array.isArray(segments) ? segments : []
+	const total = s.reduce((acc, x) => acc + (Number.isFinite(x?.value) ? x.value : 0), 0) || 1
+	const cx = size / 2
+	const cy = size / 2
+	const r = size * 0.36
+	const stroke = size * 0.12
+	const C = 2 * Math.PI * r
+	let offset = 0
+
+	return (
+		<svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+			<circle cx={cx} cy={cy} r={r} fill='none' stroke='#e2e8f0' strokeWidth={stroke} />
+			{s.map((seg) => {
+				const val = Number.isFinite(seg?.value) ? seg.value : 0
+				const frac = clamp(val / total, 0, 1)
+				const len = frac * C
+				const dash = `${len} ${C - len}`
+				const dashOffset = -offset
+				offset += len
+				return (
+					<circle
+						key={`seg-${seg?.label || seg?.color || 'seg'}`}
+						cx={cx}
+						cy={cy}
+						r={r}
+						fill='none'
+						stroke={seg.color}
+						strokeWidth={stroke}
+						strokeLinecap='round'
+						strokeDasharray={dash}
+						strokeDashoffset={dashOffset}
+						transform={`rotate(-90 ${cx} ${cy})`}
+					/>
+				)
+			})}
+		</svg>
+	)
+}
 
 const Badge = ({ children, variant = 'slate' }) => {
 	const styles = {
@@ -27,6 +174,40 @@ const Tag = ({ children }) => (
 		{children}
 	</span>
 )
+
+const parseSalaryRange = (value) => {
+	const text = String(value || '').trim()
+	if (!text) return null
+	const matches = [...text.matchAll(/(\d+(?:[\.,]\d+)?)(\s*[kK])?/g)]
+	if (!matches.length) return null
+	const numbers = matches
+		.map((m) => {
+			const raw = String(m[1] || '').replace(',', '.')
+			let n = Number.parseFloat(raw)
+			if (!Number.isFinite(n)) return null
+			if (m[2]) n *= 1000
+			return Math.round(n)
+		})
+		.filter((n) => Number.isFinite(n))
+	if (!numbers.length) return null
+	if (numbers.length === 1) return { min: numbers[0], max: numbers[0] }
+	const min = Math.min(numbers[0], numbers[1])
+	const max = Math.max(numbers[0], numbers[1])
+	return { min, max }
+}
+
+const extractMaxExperienceYears = (text) => {
+	const s = String(text || '')
+	const matches = [...s.matchAll(/(\d{1,2})\s*\+?\s*(?:ans|ann[eé]e?s?|years?)/gi)]
+	if (!matches.length) return null
+	let max = null
+	for (const m of matches) {
+		const n = Number.parseInt(m[1], 10)
+		if (!Number.isFinite(n)) continue
+		if (max === null || n > max) max = n
+	}
+	return max
+}
 
 const toStringList = (value) => {
 	if (!value) return []
@@ -130,14 +311,35 @@ function DashboardCand() {
 	const navigate = useNavigate()
 	const [candidate, setCandidate] = useState(null)
 	const [selectedView, setSelectedView] = useState('offres')
+	const [candidateSessionId, setCandidateSessionId] = useState(() => {
+		try {
+			return localStorage.getItem('airCandidateSessionId') || ''
+		} catch {
+			return ''
+		}
+	})
+	const candidateSessionIdRef = useRef(candidateSessionId)
+	useEffect(() => {
+		candidateSessionIdRef.current = candidateSessionId
+	}, [candidateSessionId])
+
+	const [dashboardStats, setDashboardStats] = useState(null)
+	const [dashboardLoading, setDashboardLoading] = useState(false)
+	const [dashboardError, setDashboardError] = useState('')
 	const [selectedJobId, setSelectedJobId] = useState(null)
 	const [savedJobs, setSavedJobs] = useState(() => new Set())
 	const [searchQuery, setSearchQuery] = useState('')
+	const [salaryMin, setSalaryMin] = useState('')
+	const [salaryMax, setSalaryMax] = useState('')
+	const [experienceMinYears, setExperienceMinYears] = useState('')
 	const [currentTime, setCurrentTime] = useState(new Date())
 	const [jobs, setJobs] = useState([])
 	const [candidacies, setCandidacies] = useState([])
 	const [loading, setLoading] = useState(true)
 	const [loadError, setLoadError] = useState('')
+	const [cvMatchLoading, setCvMatchLoading] = useState(false)
+	const [cvMatchError, setCvMatchError] = useState('')
+	const cvMatchSignatureRef = useRef('')
 	const [isApplying, setIsApplying] = useState(false)
 	const [applyStatus, setApplyStatus] = useState(null)
 	const [cvLoading, setCvLoading] = useState(false)
@@ -149,38 +351,77 @@ function DashboardCand() {
 	const [suggestionsHint, setSuggestionsHint] = useState('')
 	const [suggestionsData, setSuggestionsData] = useState(null)
 
+	const [assistantChatId, setAssistantChatId] = useState(null)
 	const [assistantMessages, setAssistantMessages] = useState(() => [
-		{
-			role: 'assistant',
-			content:
-				"Bonjour, je suis l’Assistant IA d’A.I.R. Je peux t’aider à améliorer ton CV, préparer un entretien, comprendre tes suggestions, ou adapter ta candidature à une offre.",
-		},
+		{ role: 'assistant', content: "Bonjour, je suis l’Assistant IA d’A.I.R. Pose-moi tes questions sur ton CV, ta candidature, ou la préparation d’entretien." },
 	])
 	const [assistantInput, setAssistantInput] = useState('')
-	const [assistantOfferText, setAssistantOfferText] = useState('')
-	const [assistantOfferLinkedJobId, setAssistantOfferLinkedJobId] = useState(null)
 	const [assistantFile, setAssistantFile] = useState(null)
 	const [assistantLoading, setAssistantLoading] = useState(false)
 	const [assistantError, setAssistantError] = useState('')
+
+	const [offerHelpChatId, setOfferHelpChatId] = useState(null)
+	const [offerHelpMessages, setOfferHelpMessages] = useState(() => [
+		{ role: 'assistant', content: "Bonjour. Sélectionne une offre puis je t’aide à adapter ta candidature et te préparer à l’entretien." },
+	])
+	const [offerHelpInput, setOfferHelpInput] = useState('')
+	const [offerHelpOfferText, setOfferHelpOfferText] = useState('')
+	const [offerHelpOfferLinkedJobId, setOfferHelpOfferLinkedJobId] = useState(null)
+	const [offerHelpFile, setOfferHelpFile] = useState(null)
+	const [offerHelpLoading, setOfferHelpLoading] = useState(false)
+	const [offerHelpError, setOfferHelpError] = useState('')
+	const [assistantHydrated, setAssistantHydrated] = useState(false)
+	const [offerHelpHydrated, setOfferHelpHydrated] = useState(false)
+	const [notifications, setNotifications] = useState([])
+	const [notificationsUnreadCount, setNotificationsUnreadCount] = useState(0)
+	const [notificationsLoading, setNotificationsLoading] = useState(false)
+	const [notificationsError, setNotificationsError] = useState('')
+	const [settingsForm, setSettingsForm] = useState({
+		firstName: '',
+		lastName: '',
+		email: '',
+		country: '',
+		birthDate: '',
+		professionalTitle: '',
+		sector: '',
+		experienceLevel: 'junior',
+		portfolioUrl: '',
+	})
+	const [settingsSaving, setSettingsSaving] = useState(false)
+	const [settingsMessage, setSettingsMessage] = useState('')
+	const [settingsError, setSettingsError] = useState('')
+	const [settingsCvFile, setSettingsCvFile] = useState(null)
+	const [settingsCvUploading, setSettingsCvUploading] = useState(false)
+	const [settingsCvMessage, setSettingsCvMessage] = useState('')
+	const [settingsCvError, setSettingsCvError] = useState('')
+	const [passwordForm, setPasswordForm] = useState({
+		currentPassword: '',
+		newPassword: '',
+		confirmPassword: '',
+	})
+	const [passwordSaving, setPasswordSaving] = useState(false)
+	const [passwordMessage, setPasswordMessage] = useState('')
+	const [passwordError, setPasswordError] = useState('')
 
 	const normalizedSuggestions = useMemo(() => normalizeSuggestionsPayload(suggestionsData), [suggestionsData])
 
 	useEffect(() => {
 		const job = jobs.find((j) => j.id === selectedJobId) || null
 		if (!job?.id) return
-		if (assistantOfferLinkedJobId === job.id) return
-		setAssistantOfferLinkedJobId(job.id)
-		setAssistantOfferText(job?.desc || '')
-	}, [jobs, selectedJobId, assistantOfferLinkedJobId])
+		if (offerHelpOfferLinkedJobId === job.id) return
+		setOfferHelpOfferLinkedJobId(job.id)
+		setOfferHelpOfferText(job?.desc || '')
+	}, [jobs, selectedJobId, offerHelpOfferLinkedJobId])
 
 	const sendAssistantMessage = async (content) => {
 		const text = String(content || '').trim()
 		if (!text || assistantLoading) return
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) return
 
 		setAssistantError('')
 		setAssistantLoading(true)
 		setAssistantMessages((prev) => [...prev, { role: 'user', content: text }])
-
 		try {
 			const history = assistantMessages
 				.slice(-10)
@@ -188,11 +429,11 @@ function DashboardCand() {
 				.filter((m) => m.role === 'user' || m.role === 'assistant')
 
 			const payloadBase = {
+				candidateId,
 				candidateName,
-				jobTitle: selectedJob?.title || '',
-				company: selectedJob?.company || '',
+				chatType: 'assistant',
+				chatId: assistantChatId || '',
 				suggestions: suggestionsData || '',
-				jobOfferText: assistantOfferText || selectedJob?.desc || '',
 				history,
 				message: text,
 			}
@@ -201,17 +442,8 @@ function DashboardCand() {
 			if (assistantFile) {
 				const fd = new FormData()
 				fd.append('attachment', assistantFile)
-				fd.append('candidateName', payloadBase.candidateName)
-				fd.append('jobTitle', payloadBase.jobTitle)
-				fd.append('company', payloadBase.company)
-				fd.append('jobOfferText', payloadBase.jobOfferText)
-				fd.append('suggestions', JSON.stringify(payloadBase.suggestions || ''))
-				fd.append('history', JSON.stringify(payloadBase.history || []))
-				fd.append('message', payloadBase.message)
-				res = await fetch(`${API_BASE}/assistant/candidate`, {
-					method: 'POST',
-					body: fd,
-				})
+				Object.entries(payloadBase).forEach(([k, v]) => fd.append(k, typeof v === 'string' ? v : JSON.stringify(v)))
+				res = await fetch(`${API_BASE}/assistant/candidate`, { method: 'POST', body: fd })
 			} else {
 				res = await fetch(`${API_BASE}/assistant/candidate`, {
 					method: 'POST',
@@ -221,9 +453,8 @@ function DashboardCand() {
 			}
 
 			const data = await res.json().catch(() => ({}))
-			if (!res.ok || !data?.success) {
-				throw new Error(data?.message || data?.error || "Erreur pendant la réponse de l'assistant")
-			}
+			if (!res.ok || !data?.success) throw new Error(data?.message || data?.error || "Erreur pendant la réponse de l'assistant")
+			if (data?.chatId) setAssistantChatId(data.chatId)
 			setAssistantMessages((prev) => [...prev, { role: 'assistant', content: String(data.reply || '').trim() || '—' }])
 		} catch (e) {
 			setAssistantError(String(e?.message || 'Erreur'))
@@ -233,11 +464,199 @@ function DashboardCand() {
 		}
 	}
 
+	const sendOfferHelpMessage = async (content) => {
+		const text = String(content || '').trim()
+		if (!text || offerHelpLoading) return
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) return
+
+		setOfferHelpError('')
+		setOfferHelpLoading(true)
+		setOfferHelpMessages((prev) => [...prev, { role: 'user', content: text }])
+		try {
+			const history = offerHelpMessages
+				.slice(-10)
+				.map((m) => ({ role: m.role, content: m.content }))
+				.filter((m) => m.role === 'user' || m.role === 'assistant')
+
+			const payloadBase = {
+				candidateId,
+				candidateName,
+				chatType: 'offerHelp',
+				chatId: offerHelpChatId || '',
+				jobOfferId: selectedJob?.id || '',
+				jobTitle: selectedJob?.title || '',
+				company: selectedJob?.company || '',
+				suggestions: suggestionsData || '',
+				jobOfferText: offerHelpOfferText || selectedJob?.desc || '',
+				history,
+				message: text,
+			}
+
+			let res
+			if (offerHelpFile) {
+				const fd = new FormData()
+				fd.append('attachment', offerHelpFile)
+				Object.entries(payloadBase).forEach(([k, v]) => fd.append(k, typeof v === 'string' ? v : JSON.stringify(v)))
+				res = await fetch(`${API_BASE}/assistant/candidate`, { method: 'POST', body: fd })
+			} else {
+				res = await fetch(`${API_BASE}/assistant/candidate`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(payloadBase),
+				})
+			}
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) throw new Error(data?.message || data?.error || "Erreur pendant la réponse de l'assistant")
+			if (data?.chatId) setOfferHelpChatId(data.chatId)
+			setOfferHelpMessages((prev) => [...prev, { role: 'assistant', content: String(data.reply || '').trim() || '—' }])
+		} catch (e) {
+			setOfferHelpError(String(e?.message || 'Erreur'))
+			setOfferHelpMessages((prev) => [...prev, { role: 'assistant', content: "Désolé, je n’ai pas pu répondre. Réessaie dans un instant." }])
+		} finally {
+			setOfferHelpLoading(false)
+		}
+	}
+
 	const handleAssistantSend = async () => {
 		const content = assistantInput.trim()
 		if (!content) return
 		setAssistantInput('')
 		await sendAssistantMessage(content)
+	}
+
+	const handleOfferHelpSend = async () => {
+		const content = offerHelpInput.trim()
+		if (!content) return
+		setOfferHelpInput('')
+		await sendOfferHelpMessage(content)
+	}
+
+	const candidateIdForSession = candidate?.id || candidate?._id
+
+	useEffect(() => {
+		// When candidate session changes (id), re-allow hydration.
+		setAssistantHydrated(false)
+		setOfferHelpHydrated(false)
+		setAssistantChatId(null)
+		setOfferHelpChatId(null)
+		setAssistantMessages([
+			{ role: 'assistant', content: "Bonjour, je suis l’Assistant IA d’A.I.R. Pose-moi tes questions sur ton CV, ta candidature, ou la préparation d’entretien." },
+		])
+		setOfferHelpMessages([
+			{ role: 'assistant', content: "Bonjour. Sélectionne une offre puis je t’aide à adapter ta candidature et te préparer à l’entretien." },
+		])
+	}, [candidateIdForSession])
+
+	useEffect(() => {
+		if (!candidate) return
+		if (assistantHydrated) return
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) return
+		// Only hydrate if user hasn't started a new conversation yet.
+		if (assistantChatId || assistantMessages.length > 1) {
+			setAssistantHydrated(true)
+			return
+		}
+
+		let cancelled = false
+		fetch(`${API_BASE}/chats/candidate/${candidateId}?type=assistant&limit=1`)
+			.then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
+			.then(({ ok, json }) => {
+				if (cancelled) return
+				if (!ok || !json?.success) return
+				const chat = Array.isArray(json.chats) && json.chats.length ? json.chats[0] : null
+				if (!chat?._id) return
+				const msgs = Array.isArray(chat.messages) ? chat.messages : []
+				if (msgs.length) {
+					setAssistantChatId(chat._id)
+					setAssistantMessages(msgs.map((m) => ({ role: m.role, content: m.content })))
+				}
+			})
+			.finally(() => {
+				if (cancelled) return
+				setAssistantHydrated(true)
+			})
+
+		return () => {
+			cancelled = true
+		}
+	}, [candidate, assistantHydrated, assistantChatId, assistantMessages.length])
+
+	useEffect(() => {
+		if (!candidate) return
+		if (selectedView !== 'offerHelp') return
+		if (offerHelpHydrated) return
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) return
+		const jobOfferId = selectedJobId || ''
+		if (!jobOfferId) {
+			setOfferHelpHydrated(true)
+			return
+		}
+		if (offerHelpChatId || offerHelpMessages.length > 1) {
+			setOfferHelpHydrated(true)
+			return
+		}
+
+		let cancelled = false
+		fetch(`${API_BASE}/chats/candidate/${candidateId}?type=offerHelp&jobOfferId=${encodeURIComponent(jobOfferId)}&limit=1`)
+			.then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
+			.then(({ ok, json }) => {
+				if (cancelled) return
+				if (!ok || !json?.success) return
+				const chat = Array.isArray(json.chats) && json.chats.length ? json.chats[0] : null
+				if (!chat?._id) return
+				const msgs = Array.isArray(chat.messages) ? chat.messages : []
+				if (msgs.length) {
+					setOfferHelpChatId(chat._id)
+					setOfferHelpMessages(msgs.map((m) => ({ role: m.role, content: m.content })))
+				}
+			})
+			.finally(() => {
+				if (cancelled) return
+				setOfferHelpHydrated(true)
+			})
+		return () => {
+			cancelled = true
+		}
+	}, [candidate, selectedView, selectedJobId, offerHelpHydrated, offerHelpChatId, offerHelpMessages.length])
+
+	const fetchNotifications = async (candidateId) => {
+		if (!candidateId) return
+		setNotificationsLoading(true)
+		setNotificationsError('')
+		try {
+			const res = await fetch(`${API_BASE}/notifications/candidate/${candidateId}?limit=50`)
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) {
+				throw new Error(data?.message || 'Impossible de charger les notifications.')
+			}
+			setNotifications(Array.isArray(data.notifications) ? data.notifications : [])
+			setNotificationsUnreadCount(Number(data.unreadCount) || 0)
+		} catch (e) {
+			setNotificationsError(String(e?.message || 'Erreur'))
+			setNotifications([])
+			setNotificationsUnreadCount(0)
+		} finally {
+			setNotificationsLoading(false)
+		}
+	}
+
+	const markNotificationAsRead = async (notificationId) => {
+		if (!notificationId) return
+		setNotificationsError('')
+		try {
+			const res = await fetch(`${API_BASE}/notifications/${notificationId}/read`, { method: 'PATCH' })
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) {
+				throw new Error(data?.message || 'Impossible de marquer comme lue.')
+			}
+			setNotifications((prev) => prev.map((n) => (n._id === notificationId ? data.notification : n)))
+			setNotificationsUnreadCount((prev) => Math.max(0, prev - 1))
+		} catch (e) {
+			setNotificationsError(String(e?.message || 'Erreur'))
+		}
 	}
 
 	const menuGroups = useMemo(
@@ -262,12 +681,164 @@ function DashboardCand() {
 				title: 'Compte',
 				items: [
 					{ key: 'assistant', label: 'Assistant IA', badge: 'En ligne' },
-					{ key: 'notifications', label: 'Notifications', count: 2 },
+					{ key: 'notifications', label: 'Notifications', count: notificationsUnreadCount },
+					{ key: 'settings', label: 'Paramètres' },
 				],
 			},
 		],
-		[jobs.length, candidacies.length]
+		[jobs.length, candidacies.length, notificationsUnreadCount]
 	)
+
+	useEffect(() => {
+		if (!candidate) return
+		const birth = candidate?.birthDate ? new Date(candidate.birthDate) : null
+		const birthValue = birth && !Number.isNaN(birth.getTime()) ? birth.toISOString().slice(0, 10) : ''
+		setSettingsForm({
+			firstName: candidate?.firstName || '',
+			lastName: candidate?.lastName || '',
+			email: candidate?.email || '',
+			country: candidate?.country || '',
+			birthDate: birthValue,
+			professionalTitle: candidate?.professionalTitle || '',
+			sector: candidate?.sector || '',
+			experienceLevel: candidate?.experienceLevel || 'junior',
+			portfolioUrl: candidate?.portfolioUrl || '',
+		})
+	}, [candidate])
+
+	const updateSettingsField = (field, value) => {
+		setSettingsForm((prev) => ({ ...prev, [field]: value }))
+	}
+
+	const handleSaveProfile = async (e) => {
+		e.preventDefault()
+		setSettingsMessage('')
+		setSettingsError('')
+		if (!candidate) {
+			setSettingsError('Session candidat invalide.')
+			return
+		}
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) {
+			setSettingsError('Session candidat invalide.')
+			return
+		}
+
+		setSettingsSaving(true)
+		try {
+			const res = await fetch(`${API_BASE}/candidates/${candidateId}`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					firstName: settingsForm.firstName,
+					lastName: settingsForm.lastName,
+					email: settingsForm.email,
+					country: settingsForm.country,
+					birthDate: settingsForm.birthDate,
+					professionalTitle: settingsForm.professionalTitle,
+					sector: settingsForm.sector,
+					experienceLevel: settingsForm.experienceLevel,
+					portfolioUrl: settingsForm.portfolioUrl,
+				}),
+			})
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) {
+				setSettingsError(data?.message || 'Impossible de sauvegarder le profil.')
+				return
+			}
+			const nextCandidate = { ...(candidate || {}), ...(data.candidate || {}) }
+			setCandidate(nextCandidate)
+			localStorage.setItem('airCandidate', JSON.stringify(nextCandidate))
+			setSettingsMessage(data?.message || 'Profil mis à jour.')
+		} catch (err) {
+			setSettingsError('Serveur indisponible. Vérifiez que le backend tourne.')
+		} finally {
+			setSettingsSaving(false)
+		}
+	}
+
+	const handleUploadCvFromSettings = async () => {
+		setSettingsCvMessage('')
+		setSettingsCvError('')
+		if (!settingsCvFile) {
+			setSettingsCvError('Choisissez un fichier CV (PDF/HTML).')
+			return
+		}
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) {
+			setSettingsCvError('Session candidat invalide.')
+			return
+		}
+		setSettingsCvUploading(true)
+		try {
+			const fd = new FormData()
+			fd.append('candidateId', candidateId)
+			fd.append('cvFile', settingsCvFile)
+			const res = await fetch(`${API_BASE}/cv/upload`, { method: 'POST', body: fd })
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) {
+				setSettingsCvError(data?.message || 'Upload CV impossible.')
+				return
+			}
+			setSettingsCvMessage(data?.message || 'CV uploadé.')
+			setSettingsCvFile(null)
+			setSelectedView('cv')
+		} catch {
+			setSettingsCvError('Serveur indisponible. Vérifiez que le backend tourne.')
+		} finally {
+			setSettingsCvUploading(false)
+		}
+	}
+
+	const updatePasswordField = (field, value) => {
+		setPasswordForm((prev) => ({ ...prev, [field]: value }))
+	}
+
+	const handleChangePassword = async (e) => {
+		e.preventDefault()
+		setPasswordMessage('')
+		setPasswordError('')
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) {
+			setPasswordError('Session candidat invalide.')
+			return
+		}
+		if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+			setPasswordError('Tous les champs mot de passe sont requis.')
+			return
+		}
+		if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+			setPasswordError('La confirmation ne correspond pas.')
+			return
+		}
+		if (String(passwordForm.newPassword).length < 8) {
+			setPasswordError('Le mot de passe doit contenir au moins 8 caractères.')
+			return
+		}
+
+		setPasswordSaving(true)
+		try {
+			const res = await fetch(`${API_BASE}/candidates/${candidateId}/password`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					currentPassword: passwordForm.currentPassword,
+					newPassword: passwordForm.newPassword,
+				}),
+			})
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) {
+				setPasswordError(data?.message || 'Impossible de changer le mot de passe.')
+				return
+			}
+			setPasswordMessage(data?.message || 'Mot de passe mis à jour.')
+			setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+		} catch {
+			setPasswordError('Serveur indisponible. Vérifiez que le backend tourne.')
+		} finally {
+			setPasswordSaving(false)
+		}
+	}
 
 	useEffect(() => {
 		const stored = localStorage.getItem('airCandidate')
@@ -277,11 +848,43 @@ function DashboardCand() {
 		}
 		try {
 			setCandidate(JSON.parse(stored))
+			try {
+				setCandidateSessionId(localStorage.getItem('airCandidateSessionId') || '')
+			} catch {
+				setCandidateSessionId('')
+			}
 		} catch {
 			localStorage.removeItem('airCandidate')
 			navigate('/connecter')
 		}
 	}, [navigate])
+
+	useEffect(() => {
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) return
+		if (!candidateSessionIdRef.current) return
+
+		let timer = null
+		const ping = async () => {
+			const sessionId = candidateSessionIdRef.current
+			if (!sessionId) return
+			try {
+				await fetch(`${API_BASE}/candidates/session/ping`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ candidateId, sessionId }),
+				})
+			} catch {
+				// silent
+			}
+		}
+
+		ping()
+		timer = setInterval(ping, 30000)
+		return () => {
+			if (timer) clearInterval(timer)
+		}
+	}, [candidate])
 
 	useEffect(() => {
 		const t = setInterval(() => setCurrentTime(new Date()), 1000)
@@ -292,6 +895,8 @@ function DashboardCand() {
 		if (!candidate) return
 		setLoadError('')
 		setApplyStatus(null)
+		setCvMatchError('')
+		cvMatchSignatureRef.current = ''
 		const candidateId = candidate?.id || candidate?._id
 		if (!candidateId) {
 			setLoadError('Session candidat invalide.')
@@ -323,6 +928,7 @@ function DashboardCand() {
 						desc: job.description,
 						missions: [],
 						cvMatch: [],
+						matchScore: null,
 						workMode: job.workMode,
 					}))
 					setJobs(formattedJobs)
@@ -344,6 +950,126 @@ function DashboardCand() {
 		}
 		fetchData()
 	}, [candidate])
+
+	useEffect(() => {
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) return
+		if (!Array.isArray(jobs) || jobs.length === 0) return
+
+		const signature = `${candidateId}:${jobs.map((j) => j.id).join(',')}`
+		if (cvMatchSignatureRef.current === signature) return
+		cvMatchSignatureRef.current = signature
+
+		let cancelled = false
+		setCvMatchLoading(true)
+		setCvMatchError('')
+
+		const limit = Math.min(Math.max(jobs.length, 1), 200)
+		fetch(`${API_BASE}/offers/match/${candidateId}?limit=${limit}`)
+			.then(async (res) => {
+				const data = await res.json().catch(() => ({}))
+				if (!res.ok || !data?.success) throw new Error(data?.message || 'Impossible de calculer les correspondances CV ↔ offres.')
+				return data
+			})
+			.then((data) => {
+				if (cancelled) return
+				const matchByOfferId = new Map((data?.matches || []).map((m) => [String(m.offerId), m]))
+				setJobs((prev) =>
+					prev.map((j) => {
+						const m = matchByOfferId.get(String(j.id))
+						if (!m) return j
+						return {
+							...j,
+							matchScore: Number.isFinite(m?.score) ? m.score : j.matchScore,
+							cvMatch: Array.isArray(m?.keywords) ? m.keywords : j.cvMatch,
+						}
+					})
+				)
+			})
+			.catch((e) => {
+				if (cancelled) return
+				setCvMatchError(e?.message || 'Correspondances indisponibles.')
+			})
+			.finally(() => {
+				if (!cancelled) setCvMatchLoading(false)
+			})
+
+		return () => {
+			cancelled = true
+		}
+	}, [candidate, jobs])
+
+	useEffect(() => {
+		if (!candidate) return
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) return
+		fetchNotifications(candidateId)
+	}, [candidate])
+
+	useEffect(() => {
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) return
+		if (selectedView !== 'dashboard') return
+
+		let cancelled = false
+		const run = async () => {
+			try {
+				setDashboardError('')
+				setDashboardLoading(true)
+				const res = await fetch(`${API_BASE}/analytics/candidate/${candidateId}/dashboard?days=30`)
+				const data = await res.json().catch(() => ({}))
+				if (!res.ok || !data?.success) throw new Error(data?.message || 'Impossible de charger les statistiques')
+				if (cancelled) return
+				setDashboardStats(data)
+			} catch (e) {
+				if (cancelled) return
+				setDashboardStats(null)
+				setDashboardError(e?.message || 'Erreur de chargement')
+			} finally {
+				if (!cancelled) setDashboardLoading(false)
+			}
+		}
+
+		run()
+		return () => {
+			cancelled = true
+		}
+	}, [candidate, selectedView])
+
+	const formatHoursList = (items) => {
+		if (!Array.isArray(items) || items.length === 0) return '—'
+		return items
+			.map((x) => {
+				const h = String(x.hour).padStart(2, '0')
+				return `${h}h (${x.count})`
+			})
+			.join(', ')
+	}
+
+	const dashboardSeries = useMemo(() => {
+		const byDay = dashboardStats?.sessions?.connectedHoursByDay
+		const points = Array.isArray(byDay)
+			? byDay.map((d) => {
+				const label = String(d?.date || '').slice(5)
+				return { label, value: Number.isFinite(d?.hours) ? d.hours : 0 }
+			})
+			: []
+		return points
+	}, [dashboardStats])
+
+	const dashboardLoginHours = useMemo(() => {
+		const raw = dashboardStats?.sessions?.loginHourCounts
+		const v = Array.isArray(raw) ? raw.map((n) => (Number.isFinite(n) ? n : 0)) : []
+		const labels = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}h`)
+		return { values: v.length === 24 ? v : new Array(24).fill(0), labels }
+	}, [dashboardStats])
+
+	useEffect(() => {
+		if (selectedView !== 'notifications') return
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) return
+		fetchNotifications(candidateId)
+	}, [selectedView, candidate])
 
 	useEffect(() => {
 		if (selectedView !== 'cv') return
@@ -406,8 +1132,29 @@ function DashboardCand() {
 		return ids
 	}, [candidacies])
 
-	const handleLogout = () => {
+	const handleLogout = async () => {
+		const candidateId = candidate?.id || candidate?._id
+		const sessionId = (() => {
+			try {
+				return localStorage.getItem('airCandidateSessionId')
+			} catch {
+				return null
+			}
+		})()
+		if (candidateId && sessionId) {
+			try {
+				await fetch(`${API_BASE}/candidates/logout`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ candidateId, sessionId }),
+				})
+			} catch {
+				// ignore
+			}
+		}
 		localStorage.removeItem('airCandidate')
+		localStorage.removeItem('airCandidateSessionId')
+		setCandidateSessionId('')
 		navigate('/connecter')
 	}
 
@@ -462,11 +1209,37 @@ function DashboardCand() {
 
 	const filtered = useMemo(() => {
 		const q = searchQuery.trim().toLowerCase()
-		if (!q) return jobs
-		return jobs.filter(
-			(j) => j.title.toLowerCase().includes(q) || j.location.toLowerCase().includes(q) || j.company.toLowerCase().includes(q)
-		)
-	}, [searchQuery, jobs])
+		const hasMinSalary = String(salaryMin || '').trim() !== ''
+		const hasMaxSalary = String(salaryMax || '').trim() !== ''
+		const hasMinExp = String(experienceMinYears || '').trim() !== ''
+
+		const minSalaryValue = hasMinSalary ? Number(salaryMin) : null
+		const maxSalaryValue = hasMaxSalary ? Number(salaryMax) : null
+		const minExpValue = hasMinExp ? Number(experienceMinYears) : null
+
+		return jobs.filter((j) => {
+			if (q) {
+				const hay = `${j.title} ${j.location} ${j.company} ${j.desc || ''}`.toLowerCase()
+				if (!hay.includes(q)) return false
+			}
+
+			if (hasMinSalary || hasMaxSalary) {
+				const range = parseSalaryRange(j.salary)
+				if (!range) return false
+				if (Number.isFinite(minSalaryValue) && range.max < minSalaryValue) return false
+				if (Number.isFinite(maxSalaryValue) && range.min > maxSalaryValue) return false
+			}
+
+			if (hasMinExp) {
+				const years = extractMaxExperienceYears(j.desc || '')
+				if (!Number.isFinite(minExpValue)) return true
+				if (years === null) return false
+				if (years < minExpValue) return false
+			}
+
+			return true
+		})
+	}, [searchQuery, salaryMin, salaryMax, experienceMinYears, jobs])
 
 	const selectedJob = useMemo(() => {
 		if (!selectedJobId && jobs.length > 0) return jobs[0]
@@ -667,13 +1440,62 @@ function DashboardCand() {
 									</select>
 								</div>
 
+								<div className='grid gap-4 md:grid-cols-4'>
+									<div className='rounded-2xl border border-slate-200 bg-white px-4 py-3'>
+										<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>SALAIRE MIN</p>
+										<input
+											type='number'
+											inputMode='numeric'
+											placeholder='ex: 2500'
+											value={salaryMin}
+											onChange={(e) => setSalaryMin(e.target.value)}
+											className='mt-1 w-full bg-transparent text-sm font-semibold text-slate-800 outline-none placeholder:text-slate-400'
+										/>
+									</div>
+									<div className='rounded-2xl border border-slate-200 bg-white px-4 py-3'>
+										<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>SALAIRE MAX</p>
+										<input
+											type='number'
+											inputMode='numeric'
+											placeholder='ex: 4000'
+											value={salaryMax}
+											onChange={(e) => setSalaryMax(e.target.value)}
+											className='mt-1 w-full bg-transparent text-sm font-semibold text-slate-800 outline-none placeholder:text-slate-400'
+										/>
+									</div>
+									<div className='rounded-2xl border border-slate-200 bg-white px-4 py-3'>
+										<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>EXPÉRIENCE MIN</p>
+										<input
+											type='number'
+											inputMode='numeric'
+											placeholder='ans (ex: 2)'
+											value={experienceMinYears}
+											onChange={(e) => setExperienceMinYears(e.target.value)}
+											className='mt-1 w-full bg-transparent text-sm font-semibold text-slate-800 outline-none placeholder:text-slate-400'
+										/>
+									</div>
+									<button
+										type='button'
+										onClick={() => {
+											setSalaryMin('')
+											setSalaryMax('')
+											setExperienceMinYears('')
+										}}
+										className='rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+									>
+										Réinitialiser filtres
+									</button>
+								</div>
+
 								<div className='grid gap-6 lg:grid-cols-[1fr_420px]'>
 									<div className='overflow-hidden rounded-2xl border border-slate-200 bg-white'>
 										<div className='flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3'>
 											<p className='text-sm font-semibold text-slate-700'>
 												<span className='font-black text-[#0d355b]'>{filtered.length}</span> offres correspondent
 											</p>
-											<p className='text-xs font-semibold text-slate-500'>Cliquez une offre pour voir le détail</p>
+											<p className='text-xs font-semibold text-slate-500'>
+												{cvMatchLoading ? 'Analyse CV en cours…' : cvMatchError ? 'Analyse CV indisponible' : 'Cliquez une offre pour voir le détail'}
+											</p>
 										</div>
 
 										<div className='max-h-[620px] overflow-y-auto p-4'>
@@ -708,6 +1530,9 @@ function DashboardCand() {
 																			</div>
 																			<div className='flex items-center gap-2'>
 																				<Badge variant={j.type === 'CDI' ? 'emerald' : 'violet'}>{j.type}</Badge>
+																				{Number.isFinite(j.matchScore) ? (
+																					<Badge variant={j.matchScore >= 70 ? 'emerald' : j.matchScore >= 45 ? 'cyan' : 'amber'}>Match {j.matchScore}%</Badge>
+																				) : null}
 																			</div>
 																		</div>
 																		<div className='mt-3 flex flex-wrap items-center justify-between gap-3'>
@@ -770,6 +1595,11 @@ function DashboardCand() {
 														<Badge variant={selectedJob.type === 'CDI' ? 'emerald' : 'violet'}>{selectedJob.type}</Badge>
 														{selectedJob.featured ? <Badge variant='amber'>En vedette</Badge> : null}
 																	{selectedJob.workMode ? <Badge variant='blue'>{selectedJob.workMode}</Badge> : null}
+																	{Number.isFinite(selectedJob.matchScore) ? (
+																		<Badge variant={selectedJob.matchScore >= 70 ? 'emerald' : selectedJob.matchScore >= 45 ? 'cyan' : 'amber'}>
+																			Match {selectedJob.matchScore}%
+																		</Badge>
+																	) : null}
 													</div>
 
 													<div className='mt-4 grid grid-cols-3 gap-3'>
@@ -1043,7 +1873,447 @@ function DashboardCand() {
 									</div>
 								)}
 							</div>
-						) : selectedView === 'assistant' || selectedView === 'offerHelp' ? (
+						) : selectedView === 'notifications' ? (
+							<div className='mt-8 rounded-2xl border border-slate-200 bg-white p-5'>
+								<div className='flex flex-wrap items-center justify-between gap-3'>
+									<div>
+										<p className='text-lg font-bold text-[#0d355b]'>Notifications</p>
+										<p className='mt-1 text-sm text-[#4f7191]'>Quand un recruteur planifie un rendez-vous, vous le verrez ici.</p>
+									</div>
+									<button
+										type='button'
+										onClick={() => {
+											const candidateId = candidate?.id || candidate?._id
+											fetchNotifications(candidateId)
+										}}
+										className='rounded-xl border border-[#0a7aa2] px-4 py-2 text-sm font-semibold text-[#0a5f88] transition hover:bg-[#ebfaff]'
+									>
+										Rafraîchir
+									</button>
+								</div>
+
+								{notificationsError ? (
+									<div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{notificationsError}</div>
+								) : null}
+
+								{notificationsLoading ? <p className='mt-4 text-sm text-[#4f7191]'>Chargement...</p> : null}
+
+								{!notificationsLoading && notifications.length === 0 ? (
+									<div className='mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700'>Aucune notification.</div>
+								) : null}
+
+								{!notificationsLoading && notifications.length > 0 ? (
+									<div className='mt-5 space-y-3'>
+										{notifications.map((n) => {
+											const createdAt = n?.createdAt ? new Date(n.createdAt) : null
+											const meetingAtRaw = n?.interviewId?.scheduledAt || n?.meetingAt
+											const meetingAt = meetingAtRaw ? new Date(meetingAtRaw) : null
+											const mode = n?.interviewId?.mode || n?.mode || ''
+											const meetingLink = n?.interviewId?.meetingLink || n?.meetingLink || ''
+											const location = n?.interviewId?.location || n?.location || ''
+											const notes = n?.interviewId?.notes || ''
+											const isUnread = !n?.readAt
+											return (
+												<div key={n._id} className={`rounded-2xl border p-4 ${isUnread ? 'border-cyan-200 bg-white' : 'border-slate-200 bg-slate-50'}`}>
+													<div className='flex flex-wrap items-start justify-between gap-3'>
+														<div>
+															<div className='flex items-center gap-2'>
+																<p className='text-sm font-black text-[#103b62]'>{n.title || 'Notification'}</p>
+																{isUnread ? <Badge variant='cyan'>Nouveau</Badge> : <Badge variant='slate'>Lu</Badge>}
+															</div>
+															<p className='mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700'>{n.message || '—'}</p>
+															<div className='mt-3 flex flex-wrap gap-3 text-xs font-semibold text-slate-500'>
+																<span>{createdAt ? createdAt.toLocaleString() : '—'}</span>
+																{meetingAt ? <span>Date: {meetingAt.toLocaleString()}</span> : null}
+																{mode ? <span>Nature: {mode === 'Présentiel' ? 'Présentiel' : 'En ligne'}</span> : null}
+															</div>
+															{mode === 'Présentiel' && location ? (
+																<div className='mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700'>
+																	Lieu: {location}
+																</div>
+															) : null}
+															{mode !== 'Présentiel' && meetingLink ? (
+																<a href={meetingLink} target='_blank' rel='noreferrer' className='mt-3 inline-block text-xs font-bold text-cyan-700 hover:underline'>
+																	Ouvrir le lien de réunion
+																</a>
+															) : null}
+															{notes ? (
+																<div className='mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700'>
+																	Description: {notes}
+																</div>
+															) : null}
+														</div>
+														{isUnread ? (
+															<button
+																type='button'
+																onClick={() => markNotificationAsRead(n._id)}
+																className='rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50'
+															>
+																Marquer comme lue
+															</button>
+														) : null}
+													</div>
+											</div>
+											)
+										})}
+									</div>
+								) : null}
+							</div>
+						) : selectedView === 'settings' ? (
+							<div className='mt-8 space-y-5'>
+								<div className='rounded-2xl border border-slate-200 bg-white p-5'>
+									<div className='flex flex-wrap items-center justify-between gap-3'>
+										<div>
+											<p className='text-lg font-bold text-[#0d355b]'>Paramètres</p>
+											<p className='mt-1 text-sm text-[#4f7191]'>Modifie ton profil, ton CV et ton mot de passe.</p>
+										</div>
+										<button
+											type='button'
+											onClick={() => setSelectedView('cv')}
+											className='rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+										>
+											Voir mon CV
+										</button>
+									</div>
+								</div>
+
+								<div className='grid gap-5 lg:grid-cols-2'>
+									<div className='rounded-2xl border border-slate-200 bg-white p-5'>
+										<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>PROFIL</p>
+										{settingsError ? (
+											<div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{settingsError}</div>
+										) : null}
+										{settingsMessage ? (
+											<div className='mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800'>{settingsMessage}</div>
+										) : null}
+
+										<form className='mt-4 space-y-3' onSubmit={handleSaveProfile}>
+											<div className='grid gap-3 sm:grid-cols-2'>
+												<div>
+													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Prénom</label>
+													<input
+														value={settingsForm.firstName}
+														onChange={(e) => updateSettingsField('firstName', e.target.value)}
+														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+													/>
+												</div>
+												<div>
+													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Nom</label>
+													<input
+														value={settingsForm.lastName}
+														onChange={(e) => updateSettingsField('lastName', e.target.value)}
+														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+													/>
+												</div>
+											</div>
+
+											<div>
+												<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Email</label>
+												<input
+													type='email'
+													value={settingsForm.email}
+													onChange={(e) => updateSettingsField('email', e.target.value)}
+													className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+												/>
+											</div>
+
+											<div className='grid gap-3 sm:grid-cols-2'>
+												<div>
+													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Pays</label>
+													<input
+														value={settingsForm.country}
+														onChange={(e) => updateSettingsField('country', e.target.value)}
+														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+													/>
+												</div>
+												<div>
+													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Date de naissance</label>
+													<input
+														type='date'
+														value={settingsForm.birthDate}
+														onChange={(e) => updateSettingsField('birthDate', e.target.value)}
+														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+													/>
+												</div>
+											</div>
+
+											<div className='grid gap-3 sm:grid-cols-2'>
+												<div>
+													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Titre</label>
+													<input
+														value={settingsForm.professionalTitle}
+														onChange={(e) => updateSettingsField('professionalTitle', e.target.value)}
+														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+													/>
+												</div>
+												<div>
+													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Secteur</label>
+													<input
+														value={settingsForm.sector}
+														onChange={(e) => updateSettingsField('sector', e.target.value)}
+														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+													/>
+												</div>
+											</div>
+
+											<div className='grid gap-3 sm:grid-cols-2'>
+												<div>
+													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Niveau</label>
+													<select
+														value={settingsForm.experienceLevel}
+														onChange={(e) => updateSettingsField('experienceLevel', e.target.value)}
+														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+													>
+														<option value='student'>Étudiant</option>
+														<option value='junior'>Junior</option>
+														<option value='confirmed'>Confirmé</option>
+														<option value='senior'>Senior</option>
+													</select>
+												</div>
+												<div>
+													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Portfolio (optionnel)</label>
+													<input
+														value={settingsForm.portfolioUrl}
+														onChange={(e) => updateSettingsField('portfolioUrl', e.target.value)}
+														placeholder='https://...'
+														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+													/>
+												</div>
+											</div>
+
+											<div className='pt-1'>
+												<button
+													type='submit'
+													disabled={settingsSaving}
+													className={`rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition ${settingsSaving ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
+												>
+													{settingsSaving ? 'Sauvegarde…' : 'Enregistrer'}
+												</button>
+											</div>
+										</form>
+									</div>
+
+									<div className='space-y-5'>
+										<div className='rounded-2xl border border-slate-200 bg-white p-5'>
+											<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CHANGER DE CV</p>
+											{settingsCvError ? (
+												<div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{settingsCvError}</div>
+											) : null}
+											{settingsCvMessage ? (
+												<div className='mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800'>{settingsCvMessage}</div>
+											) : null}
+											<div className='mt-4'>
+												<input
+													type='file'
+													accept='application/pdf,text/html'
+													onChange={(e) => setSettingsCvFile(e.target.files?.[0] || null)}
+													className='block w-full text-xs font-semibold text-slate-700'
+												/>
+												{settingsCvFile ? (
+													<div className='mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700'>Fichier: {settingsCvFile.name}</div>
+												) : null}
+											</div>
+											<div className='mt-3'>
+												<button
+													type='button'
+													onClick={handleUploadCvFromSettings}
+													disabled={settingsCvUploading}
+													className={`rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition ${settingsCvUploading ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
+												>
+													{settingsCvUploading ? 'Upload…' : 'Uploader un nouveau CV'}
+												</button>
+											</div>
+										</div>
+
+										<div className='rounded-2xl border border-slate-200 bg-white p-5'>
+											<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>MOT DE PASSE</p>
+											{passwordError ? (
+												<div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{passwordError}</div>
+											) : null}
+											{passwordMessage ? (
+												<div className='mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800'>{passwordMessage}</div>
+											) : null}
+											<form className='mt-4 space-y-3' onSubmit={handleChangePassword}>
+												<div>
+													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Mot de passe actuel</label>
+													<input
+														type='password'
+														value={passwordForm.currentPassword}
+														onChange={(e) => updatePasswordField('currentPassword', e.target.value)}
+														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+													/>
+												</div>
+												<div>
+													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Nouveau mot de passe</label>
+													<input
+														type='password'
+														value={passwordForm.newPassword}
+														onChange={(e) => updatePasswordField('newPassword', e.target.value)}
+														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+													/>
+												</div>
+												<div>
+													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Confirmer</label>
+													<input
+														type='password'
+														value={passwordForm.confirmPassword}
+														onChange={(e) => updatePasswordField('confirmPassword', e.target.value)}
+														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+													/>
+												</div>
+												<div className='pt-1'>
+													<button
+														type='submit'
+														disabled={passwordSaving}
+														className={`rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition ${passwordSaving ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
+													>
+														{passwordSaving ? 'Mise à jour…' : 'Changer le mot de passe'}
+													</button>
+												</div>
+											</form>
+										</div>
+									</div>
+								</div>
+							</div>
+						) : selectedView === 'dashboard' ? (
+							<div className='mt-8 rounded-2xl border border-slate-200 bg-white p-5'>
+								<div className='flex flex-wrap items-center gap-3'>
+									<div>
+										<p className='text-lg font-bold text-[#0d355b]'>Dashboard</p>
+										<p className='mt-1 text-sm text-[#4f7191]'>Statistiques basées sur votre activité (données MongoDB).</p>
+									</div>
+								</div>
+
+								{dashboardLoading ? <p className='mt-4 text-sm text-[#4f7191]'>Chargement…</p> : null}
+								{!dashboardLoading && dashboardError ? (
+									<div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{dashboardError}</div>
+								) : null}
+
+								{!dashboardLoading && !dashboardError && dashboardStats ? (
+									<div className='mt-5 space-y-4'>
+										<div className='grid gap-4 md:grid-cols-3'>
+											<div className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
+												<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>TEMPS CONNECTÉ (30J)</p>
+												<p className='mt-2 text-3xl font-black text-slate-900'>{dashboardStats?.sessions?.connectedHours ?? 0} h</p>
+											</div>
+											<div className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
+												<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>NOMBRE DE CONNEXIONS</p>
+												<p className='mt-2 text-3xl font-black text-slate-900'>{dashboardStats?.sessions?.count ?? 0}</p>
+											</div>
+											<div className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
+												<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>HEURES FRÉQUENTES</p>
+												<p className='mt-2 text-sm font-semibold text-slate-700'>{formatHoursList(dashboardStats?.sessions?.mostFrequentLoginHours)}</p>
+											</div>
+										</div>
+
+										<div className='grid gap-4 md:grid-cols-3'>
+											<div className='rounded-2xl border border-slate-200 bg-white p-4'>
+												<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>OFFRES POSTULÉES</p>
+												<p className='mt-2 text-3xl font-black text-slate-900'>{dashboardStats?.offers?.appliedCount ?? 0}</p>
+											</div>
+											<div className='rounded-2xl border border-slate-200 bg-white p-4'>
+												<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>ENTRETIENS</p>
+												<p className='mt-2 text-3xl font-black text-slate-900'>{dashboardStats?.offers?.interviewsCount ?? 0}</p>
+											</div>
+											<div className='rounded-2xl border border-slate-200 bg-white p-4'>
+												<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>POSTULÉ + ENTRETIEN</p>
+												<p className='mt-2 text-3xl font-black text-slate-900'>{dashboardStats?.offers?.appliedWithInterviewCount ?? 0}</p>
+											</div>
+										</div>
+
+										<div className='grid gap-4 lg:grid-cols-3'>
+											<div className='rounded-2xl border border-slate-200 bg-white p-4 lg:col-span-2'>
+												<div className='flex flex-wrap items-end justify-between gap-2'>
+													<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>COURBE: HEURES CONNECTÉES / JOUR</p>
+													<p className='text-xs font-semibold text-slate-500'>30 derniers jours</p>
+												</div>
+												<div className='mt-3'>
+													<LineAreaChart data={dashboardSeries} />
+												</div>
+											</div>
+											<div className='rounded-2xl border border-slate-200 bg-white p-4'>
+												<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>RÉPARTITION</p>
+												<div className='mt-3 flex items-center justify-center'>
+													<DonutChart
+														segments={[
+															{ label: 'Candidatures', value: dashboardStats?.offers?.appliedCount ?? 0, color: '#001d3e' },
+															{ label: 'Entretiens', value: dashboardStats?.offers?.interviewsCount ?? 0, color: '#06d5e0' },
+															{ label: 'Postulé+Entretien', value: dashboardStats?.offers?.appliedWithInterviewCount ?? 0, color: '#0a5f88' },
+														]}
+													/>
+												</div>
+												<div className='mt-3 space-y-1 text-xs font-semibold text-slate-600'>
+													<div className='flex items-center justify-between gap-2'>
+														<span className='inline-flex items-center gap-2'>
+															<span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: '#001d3e' }} />
+															Candidatures
+														</span>
+														<span>{dashboardStats?.offers?.appliedCount ?? 0}</span>
+													</div>
+													<div className='flex items-center justify-between gap-2'>
+														<span className='inline-flex items-center gap-2'>
+															<span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: '#06d5e0' }} />
+															Entretiens
+														</span>
+														<span>{dashboardStats?.offers?.interviewsCount ?? 0}</span>
+													</div>
+													<div className='flex items-center justify-between gap-2'>
+														<span className='inline-flex items-center gap-2'>
+															<span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: '#0a5f88' }} />
+															Postulé + entretien
+														</span>
+														<span>{dashboardStats?.offers?.appliedWithInterviewCount ?? 0}</span>
+													</div>
+												</div>
+											</div>
+										</div>
+
+										<div className='rounded-2xl border border-slate-200 bg-white p-4'>
+											<div className='flex flex-wrap items-end justify-between gap-2'>
+												<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>HISTOGRAMME: HEURES DE CONNEXION</p>
+												<p className='text-xs font-semibold text-slate-500'>Nombre de connexions par heure</p>
+											</div>
+											<div className='mt-3'>
+												<BarChart values={dashboardLoginHours.values} labels={dashboardLoginHours.labels} />
+											</div>
+										</div>
+
+										<div className='grid gap-4 lg:grid-cols-2'>
+											<div className='rounded-2xl border border-slate-200 bg-white p-4'>
+												<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>DERNIÈRES CANDIDATURES</p>
+												{(dashboardStats?.offers?.recentApplied || []).length === 0 ? (
+													<p className='mt-3 text-sm text-slate-600'>Aucune candidature.</p>
+												) : (
+													<div className='mt-3 space-y-2'>
+														{dashboardStats.offers.recentApplied.map((a) => (
+															<div key={a.candidacyId} className='rounded-xl border border-slate-200 bg-slate-50 px-3 py-2'>
+																<p className='text-sm font-semibold text-slate-800'>{a.title}</p>
+																<p className='text-xs font-semibold text-slate-500'>{a.location || '—'}</p>
+															</div>
+														))}
+													</div>
+												)}
+											</div>
+											<div className='rounded-2xl border border-slate-200 bg-white p-4'>
+												<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>PROCHAINS ENTRETIENS</p>
+												{(dashboardStats?.offers?.upcomingInterviews || []).length === 0 ? (
+													<p className='mt-3 text-sm text-slate-600'>Aucun entretien à venir.</p>
+												) : (
+													<div className='mt-3 space-y-2'>
+														{dashboardStats.offers.upcomingInterviews.map((i) => (
+															<div key={i.interviewId} className='rounded-xl border border-slate-200 bg-slate-50 px-3 py-2'>
+																<p className='text-sm font-semibold text-slate-800'>{i.title}</p>
+																<p className='text-xs font-semibold text-slate-500'>{i.scheduledAt ? new Date(i.scheduledAt).toLocaleString() : '—'}</p>
+															</div>
+														))}
+													</div>
+												)}
+											</div>
+										</div>
+									</div>
+								) : null}
+							</div>
+						) : selectedView === 'offerHelp' ? (
 							<div className='mt-8 rounded-2xl border border-slate-200 bg-white p-5'>
 								<div className='flex items-start justify-between gap-3 flex-wrap'>
 									<div>
@@ -1055,12 +2325,12 @@ function DashboardCand() {
 											<button
 												type='button'
 												onClick={() =>
-												sendAssistantMessage(
-													`Je postule à l’offre “${selectedJob.title}” chez ${selectedJob.company}. Donne-moi des conseils concrets pour adapter mon CV et mon message de candidature. Ensuite liste les mots-clés/compétences à mettre en avant.`
-											)
+												sendOfferHelpMessage(
+													`Je postule à l’offre “${selectedJob.title}”. Donne-moi des conseils concrets pour adapter mon CV et mon message de candidature. Ensuite liste les mots-clés/compétences à mettre en avant.`
+												)
 											}
-											disabled={assistantLoading}
-											className={`rounded-xl px-4 py-2 text-xs font-semibold text-white transition ${assistantLoading ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
+											disabled={offerHelpLoading}
+											className={`rounded-xl px-4 py-2 text-xs font-semibold text-white transition ${offerHelpLoading ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
 										>
 											Conseils candidature
 										</button>
@@ -1069,12 +2339,12 @@ function DashboardCand() {
 											<button
 												type='button'
 												onClick={() =>
-												sendAssistantMessage(
-													`Prépare-moi à un entretien pour l’offre “${selectedJob.title}” chez ${selectedJob.company}. Je veux: (1) 10 questions probables + bonnes réponses, (2) questions techniques si pertinent, (3) pitch 60 secondes, (4) questions à poser au recruteur.`
-											)
+												sendOfferHelpMessage(
+													`Prépare-moi à un entretien pour l’offre “${selectedJob.title}”. Je veux: (1) 10 questions probables + bonnes réponses, (2) questions techniques si pertinent, (3) pitch 60 secondes, (4) questions à poser au recruteur.`
+												)
 											}
-											disabled={assistantLoading}
-											className={`rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 ${assistantLoading ? 'opacity-60' : ''}`}
+											disabled={offerHelpLoading}
+											className={`rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 ${offerHelpLoading ? 'opacity-60' : ''}`}
 										>
 											Préparation entretien
 										</button>
@@ -1082,14 +2352,11 @@ function DashboardCand() {
 										<button
 											type='button'
 											onClick={() => {
-												setAssistantMessages([
-													{
-														role: 'assistant',
-														content:
-															"Bonjour, je suis l’Assistant IA d’A.I.R. Je peux t’aider à améliorer ton CV, préparer un entretien, comprendre tes suggestions, ou adapter ta candidature à une offre.",
-													},
+												setOfferHelpChatId(null)
+												setOfferHelpMessages([
+													{ role: 'assistant', content: "Bonjour. Sélectionne une offre puis je t’aide à adapter ta candidature et te préparer à l’entretien." },
 												])
-												setAssistantError('')
+												setOfferHelpError('')
 											}}
 											className='rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50'
 										>
@@ -1098,17 +2365,17 @@ function DashboardCand() {
 									</div>
 								</div>
 
-								{assistantError ? (
-									<div className='mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{assistantError}</div>
+								{offerHelpError ? (
+									<div className='mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{offerHelpError}</div>
 								) : null}
 
 								<div className='mt-5 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]'>
 									<div className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
 										<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CONVERSATION</p>
 										<div className='mt-3 max-h-[56vh] space-y-3 overflow-y-auto pr-1'>
-											{assistantMessages.map((m, idx) => (
+											{offerHelpMessages.map((m, idx) => (
 												<div
-													key={`msg-${idx}`}
+													key={`offer-help-msg-${idx}`}
 													className={`rounded-2xl border p-4 ${m.role === 'user' ? 'border-cyan-200 bg-white' : 'border-slate-200 bg-white'}`}
 												>
 													<p className='text-xs font-black tracking-[0.12em] text-slate-500'>{m.role === 'user' ? 'VOUS' : 'ASSISTANT IA'}</p>
@@ -1120,20 +2387,18 @@ function DashboardCand() {
 										<div className='mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4'>
 											<textarea
 												rows={3}
-												value={assistantInput}
-												onChange={(e) => setAssistantInput(e.target.value)}
-												placeholder='Pose ta question (CV, offre, entretien, compréhension des suggestions)…'
+												value={offerHelpInput}
+												onChange={(e) => setOfferHelpInput(e.target.value)}
+												placeholder='Pose ta question sur cette offre (candidature, entretien, adaptation)…'
 												className='w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300'
 											/>
 											<div className='flex items-center justify-between gap-3 flex-wrap'>
-												<div className='text-xs font-semibold text-slate-500'>
-													{assistantLoading ? 'En cours…' : selectedJob ? `Offre: ${selectedJob.title}` : 'Aucune offre sélectionnée'}
-												</div>
+												<div className='text-xs font-semibold text-slate-500'>{offerHelpLoading ? 'En cours…' : selectedJob ? `Offre: ${selectedJob.title}` : 'Aucune offre sélectionnée'}</div>
 												<button
 													type='button'
-													onClick={handleAssistantSend}
-													disabled={assistantLoading || !assistantInput.trim()}
-													className={`rounded-xl px-4 py-2 text-xs font-semibold text-white transition ${assistantLoading || !assistantInput.trim() ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
+													onClick={handleOfferHelpSend}
+													disabled={offerHelpLoading || !offerHelpInput.trim()}
+													className={`rounded-xl px-4 py-2 text-xs font-semibold text-white transition ${offerHelpLoading || !offerHelpInput.trim() ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
 												>
 													Envoyer
 												</button>
@@ -1143,7 +2408,7 @@ function DashboardCand() {
 
 									<div className='rounded-2xl border border-slate-200 bg-white p-4'>
 										<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CONTEXTE (OPTIONNEL)</p>
-										<p className='mt-2 text-xs font-semibold text-slate-600'>Ajoute l’offre (texte) et/ou ton CV en PDF pour une réponse plus précise.</p>
+										<p className='mt-2 text-xs font-semibold text-slate-600'>Ajoute l’offre (texte) et/ou ton CV pour une réponse plus précise.</p>
 										<div className='mt-3 space-y-3'>
 											<div className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
 												<p className='text-xs font-black tracking-[0.12em] text-slate-600'>OFFRES D’EMPLOI</p>
@@ -1172,8 +2437,8 @@ function DashboardCand() {
 												<p className='text-xs font-bold text-slate-700'>Offre d’emploi (texte)</p>
 												<textarea
 													rows={7}
-													value={assistantOfferText}
-													onChange={(e) => setAssistantOfferText(e.target.value)}
+													value={offerHelpOfferText}
+													onChange={(e) => setOfferHelpOfferText(e.target.value)}
 													placeholder="Colle ici la description de l’offre (missions, compétences, exigences)…"
 													className='mt-2 w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300'
 												/>
@@ -1183,15 +2448,82 @@ function DashboardCand() {
 												<input
 													type='file'
 													accept='application/pdf,text/html'
-													onChange={(e) => setAssistantFile(e.target.files?.[0] || null)}
+													onChange={(e) => setOfferHelpFile(e.target.files?.[0] || null)}
 													className='mt-2 block w-full text-xs font-semibold text-slate-700'
 												/>
-												{assistantFile ? (
-													<div className='mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700'>
-														Fichier: {assistantFile.name}
-													</div>
+												{offerHelpFile ? (
+													<div className='mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700'>Fichier: {offerHelpFile.name}</div>
 												) : null}
 											</div>
+										</div>
+									</div>
+								</div>
+							</div>
+						) : selectedView === 'assistant' ? (
+							<div className='mt-8 rounded-2xl border border-slate-200 bg-white p-5'>
+								<div className='flex items-start justify-between gap-3 flex-wrap'>
+									<div>
+										<p className='text-lg font-bold text-[#0d355b]'>Assistant IA</p>
+										<p className='mt-1 text-sm text-[#4f7191]'>Discussion simple entre toi et l’IA. Tu peux joindre ton CV (PDF/HTML).</p>
+									</div>
+									<button
+										type='button'
+										onClick={() => {
+											setAssistantChatId(null)
+											setAssistantMessages([
+												{ role: 'assistant', content: "Bonjour, je suis l’Assistant IA d’A.I.R. Pose-moi tes questions sur ton CV, ta candidature, ou la préparation d’entretien." },
+											])
+											setAssistantError('')
+											setAssistantFile(null)
+										}}
+										className='rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50'
+									>
+										Réinitialiser
+									</button>
+								</div>
+
+								{assistantError ? (
+									<div className='mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{assistantError}</div>
+								) : null}
+
+								<div className='mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4'>
+									<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CONVERSATION</p>
+									<div className='mt-3 max-h-[62vh] space-y-3 overflow-y-auto pr-1'>
+										{assistantMessages.map((m, idx) => (
+											<div key={`assistant-msg-${idx}`} className={`rounded-2xl border p-4 ${m.role === 'user' ? 'border-cyan-200 bg-white' : 'border-slate-200 bg-white'}`}>
+												<p className='text-xs font-black tracking-[0.12em] text-slate-500'>{m.role === 'user' ? 'VOUS' : 'ASSISTANT IA'}</p>
+												<p className='mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700'>{m.content}</p>
+											</div>
+										))}
+									</div>
+
+									<div className='mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4'>
+										<textarea
+											rows={3}
+											value={assistantInput}
+											onChange={(e) => setAssistantInput(e.target.value)}
+											placeholder='Pose ta question…'
+											className='w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300'
+										/>
+										<div className='flex items-center justify-between gap-3 flex-wrap'>
+											<div>
+												<p className='text-xs font-bold text-slate-700'>CV (optionnel)</p>
+												<input
+													type='file'
+													accept='application/pdf,text/html'
+													onChange={(e) => setAssistantFile(e.target.files?.[0] || null)}
+													className='mt-1 block w-full text-xs font-semibold text-slate-700'
+												/>
+												{assistantFile ? <div className='mt-2 text-xs font-semibold text-slate-600'>Fichier: {assistantFile.name}</div> : null}
+											</div>
+											<button
+												type='button'
+												onClick={handleAssistantSend}
+												disabled={assistantLoading || !assistantInput.trim()}
+												className={`rounded-xl px-4 py-2 text-xs font-semibold text-white transition ${assistantLoading || !assistantInput.trim() ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
+											>
+												{assistantLoading ? 'En cours…' : 'Envoyer'}
+											</button>
 										</div>
 									</div>
 								</div>
