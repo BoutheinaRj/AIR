@@ -8,7 +8,7 @@ function Apropos() {
     <section className='w-full py-20 sm:py-28 bg-gradient-to-b from-[#d9f1ff] via-[#a5d9ff] to-white'>
       <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
         {/* Header Section */}
-        <div className='mb-16 sm:mb-20 text-center'>
+        <div id='fonctionnalites' className='mb-16 sm:mb-20 text-center scroll-mt-24'>
           <div className='inline-block mb-4'>
             <p
               style={{ fontFamily: "'Jost', sans-serif" }}
@@ -106,7 +106,7 @@ Tests de stress, d'humeur et de personnalité pour mieux vous connaître et rass
         </div>
 
         {/* Process Section */}
-        <div className='mb-16 sm:mb-20'>
+        <div id='processus' className='mb-16 sm:mb-20 scroll-mt-24'>
           <div className='mb-10 sm:mb-12 text-center'>
             <p
               style={{ fontFamily: "'Jost', sans-serif" }}
@@ -201,7 +201,7 @@ Tests de stress, d'humeur et de personnalité pour mieux vous connaître et rass
           </div>
         </div>
         {/* Candidate / Recruiter Section */}
-        <div className='mb-16 sm:mb-20 rounded-3xl border border-[#0f2d4c]/10 bg-gradient-to-br from-[#f2f8ff] via-[#f9fcff] to-[#f0fbff] p-6 sm:p-8'>
+        <div id='pour-tous' className='mb-16 sm:mb-20 rounded-3xl border border-[#0f2d4c]/10 bg-gradient-to-br from-[#f2f8ff] via-[#f9fcff] to-[#f0fbff] p-6 sm:p-8 scroll-mt-24'>
           <div className='mb-10 sm:mb-12 text-center'>
             <p
               style={{ fontFamily: "'Jost', sans-serif" }}
@@ -277,7 +277,7 @@ Tests de stress, d'humeur et de personnalité pour mieux vous connaître et rass
         </div>
 
         {/* CTA Section */}
-        <div className='mt-20 sm:mt-28 rounded-3xl border border-[#0e5b90]/35 bg-gradient-to-r from-[#03213f] via-[#0b4577] to-[#03213f] p-12 sm:p-16 text-center shadow-[0_14px_36px_rgba(3,33,63,0.35)]'>
+        <div id='rejoindre' className='mt-20 sm:mt-28 rounded-3xl border border-[#0e5b90]/35 bg-gradient-to-r from-[#03213f] via-[#0b4577] to-[#03213f] p-12 sm:p-16 text-center shadow-[0_14px_36px_rgba(3,33,63,0.35)] scroll-mt-24'>
           <p
             style={{ fontFamily: "'Jost', sans-serif" }}
             className='text-sm sm:text-2xl font-bold uppercase tracking-[0.3em] text-[#06d5e0] px-4 py-2 rounded-full mb-4'
