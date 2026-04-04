@@ -2,10 +2,18 @@ import React, { useEffect, useState } from 'react'
 import { assets } from '../assets/assets'
 import { useLocation, useNavigate } from 'react-router-dom'
 
+const NAV_ITEMS = [
+  { id: 'fonctionnalites', label: 'Fonctionnalités' },
+  { id: 'processus', label: 'Processus' },
+  { id: 'pour-tous', label: 'Pour tous' },
+  { id: 'rejoindre', label: 'Rejoignez A.I.R' }
+]
+
 function Navbar() {
   const navigate = useNavigate()
   const location = useLocation()
   const [showScrollTop, setShowScrollTop] = useState(false)
+  const [activeSection, setActiveSection] = useState('')
 
   useEffect(() => {
     const handleScroll = () => {
@@ -23,6 +31,43 @@ function Navbar() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
+  useEffect(() => {
+    if (location.pathname !== '/') {
+      setActiveSection('')
+      return
+    }
+
+    const hashSection = String(location.hash || '').replace('#', '').trim()
+    if (hashSection) setActiveSection(hashSection)
+
+    const sectionElements = NAV_ITEMS
+      .map((item) => document.getElementById(item.id))
+      .filter(Boolean)
+
+    if (!sectionElements.length) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleEntries = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)
+
+        if (visibleEntries.length) {
+          setActiveSection(visibleEntries[0].target.id)
+        }
+      },
+      {
+        root: null,
+        rootMargin: '-25% 0px -55% 0px',
+        threshold: [0.2, 0.4, 0.6]
+      }
+    )
+
+    sectionElements.forEach((section) => observer.observe(section))
+
+    return () => observer.disconnect()
+  }, [location.pathname, location.hash])
+
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -31,9 +76,14 @@ function Navbar() {
     const sectionId = String(id || '').trim()
     if (!sectionId) return
 
+    setActiveSection(sectionId)
+
     if (location.pathname === '/') {
       const el = document.getElementById(sectionId)
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        window.history.replaceState(null, '', `#${sectionId}`)
+      }
       else navigate({ pathname: '/', hash: `#${sectionId}` })
       return
     }
@@ -44,7 +94,7 @@ function Navbar() {
   return (
     <>
       <nav
-        className='relative w-full flex items-center justify-between gap-4 py-2 bg-[#001d3e] px-4 sm:px-[5vw] md:px-[7vw] lg:px-[9vw]'
+        className='sticky top-0 z-30 w-full flex items-center justify-between gap-4 py-2 bg-[#001d3e]/95 backdrop-blur-md px-4 sm:px-[5vw] md:px-[7vw] lg:px-[9vw]'
         style={{ fontFamily: "'Jost', sans-serif" }}
       >
         <button
@@ -56,36 +106,26 @@ function Navbar() {
           <img src={assets.logo} className='w-36' alt='Logo' />
         </button>
 
-    <div className='flex flex-wrap items-center justify-end gap-2 sm:gap-3'>
-      <button
-        type='button'
-        onClick={() => scrollToSection('fonctionnalites')}
-        className='rounded-full px-3 py-2 text-sm font-semibold text-cyan-50/90 hover:text-white hover:bg-white/10 transition'
-      >
-        Fonctionnalités
-      </button>
-      <button
-        type='button'
-        onClick={() => scrollToSection('processus')}
-        className='rounded-full px-3 py-2 text-sm font-semibold text-cyan-50/90 hover:text-white hover:bg-white/10 transition'
-      >
-        Processus
-      </button>
-      <button
-        type='button'
-        onClick={() => scrollToSection('pour-tous')}
-        className='rounded-full px-3 py-2 text-sm font-semibold text-cyan-50/90 hover:text-white hover:bg-white/10 transition'
-      >
-        Pour tous
-      </button>
-      <button
-        type='button'
-        onClick={() => scrollToSection('rejoindre')}
-        className='rounded-full px-3 py-2 text-sm font-semibold text-cyan-50/90 hover:text-white hover:bg-white/10 transition'
-      >
-        Rejoignez A.I.R
-      </button>
-    </div>
+        <div className='flex flex-wrap items-center justify-end gap-2 sm:gap-3'>
+          {NAV_ITEMS.map((item) => {
+            const isActive = activeSection === item.id
+
+            return (
+              <button
+                key={item.id}
+                type='button'
+                onClick={() => scrollToSection(item.id)}
+                className={`rounded-full px-3 py-2 text-l transition ${
+                  isActive
+                    ? ' text-[#06d5e0] '
+                    : 'text-cyan-50/90 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                {item.label}
+              </button>
+            )
+          })}
+        </div>
       </nav>
 
       {showScrollTop && (
