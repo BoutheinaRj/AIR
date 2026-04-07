@@ -26,6 +26,9 @@ export default function ChatWidget() {
 
   // screens: 'closed' | 'inbox' | 'search' | 'chat'
   const [screen, setScreen] = useState('closed');
+  const screenRef = useRef(screen);
+  useEffect(() => { screenRef.current = screen; }, [screen]);
+  
   const [conversations, setConversations] = useState([]);
   const [totalUnread, setTotalUnread] = useState(0);
   const [query, setQuery] = useState('');
@@ -45,75 +48,95 @@ export default function ChatWidget() {
   const contactRef = useRef(contact);
   useEffect(() => { contactRef.current = contact; }, [contact]);
 
-  // ── Load inbox ────────────────────────────────────────────────
   // ── Load inbox (stored in ref so socket listener always has fresh version) ──
-const loadInboxRef = useRef(null);
-loadInboxRef.current = async () => {
-  const me = meRef.current;
-  if (!me) return;
-  setLoadingInbox(true);
-  try {
-    const res = await fetch(`${API_BASE}/dm/conversations?userId=${me.id}&userRole=${me.role}`);
-    const data = await res.json();
-    if (data.success) {
-      setConversations(data.conversations);
-      setTotalUnread(data.conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0));
-    }
-  } catch {
-    // silently fail
-  } finally {
-    setLoadingInbox(false);
-  }
-};
-
-// Keep the old name so the rest of the code doesn't change
-const loadInbox = () => loadInboxRef.current();
-
-  // ── Socket setup ──────────────────────────────────────────────
-  // ── Socket setup ──────────────────────────────────────────────
-useEffect(() => {
-  socket.connect();
-
-  socket.on('dm:message', (msg) => {
+  const loadInboxRef = useRef(null);
+  loadInboxRef.current = async () => {
     const me = meRef.current;
-    const currentContact = contactRef.current;
-
-    // Always refresh inbox via ref — never stale
-    loadInboxRef.current();
-
-    if (!currentContact || !me) return;
-
-    const activeKey = convKey(me.role, me.id, currentContact.role, currentContact.id);
-
-    if (msg.conversationKey === activeKey) {
-      setMessages((prev) =>
-        prev.find((m) => String(m._id) === String(msg._id))
-          ? prev
-          : [...prev, msg]
-      );
-
-      // Mark as read since chat is open
-      if (String(msg.senderId) !== String(me.id)) {
-        fetch(`${API_BASE}/dm/read`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ conversationKey: activeKey, userId: me.id }),
-        }).catch(() => {});
+    if (!me) return;
+    setLoadingInbox(true);
+    try {
+      const res = await fetch(`${API_BASE}/dm/conversations?userId=${me.id}&userRole=${me.role}`);
+      const data = await res.json();
+      if (data.success) {
+        console.log('📊 Unread counts:', data.conversations.map(c => ({
+          with: c.otherName,
+          unread: c.unreadCount
+        })));
+        setConversations(data.conversations);
+        setTotalUnread(data.conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0));
       }
+    } catch {
+      // silently fail
+    } finally {
+      setLoadingInbox(false);
     }
-  });
-
-  socket.on('dm:error', (e) => console.error('[DM]', e.message));
-
-  return () => {
-    socket.off('dm:message');
-    socket.off('dm:error');
-    socket.disconnect();
   };
-}, []); // stays empty — loadInboxRef never goes stale
+
+  const loadInbox = () => loadInboxRef.current();
+
+  // ── Socket setup ──────────────────────────────────────────────
+  useEffect(() => {
+    console.log('Connecting socket...');
+    socket.connect();
+
+    socket.on('connect', () => {
+      console.log('✅ Socket connected successfully');
+    });
+
+    socket.on('disconnect', () => {
+      console.log('❌ Socket disconnected');
+    });
+
+    socket.on('dm:message', (msg) => {
+      console.log('📨 Message received via socket:', msg);
+      const me = meRef.current;
+      const currentContact = contactRef.current;
+      const currentScreen = screenRef.current;
+
+      // Check if this message is for the currently OPEN chat
+      if (currentScreen === 'chat' && currentContact && me) {
+        const activeKey = convKey(me.role, me.id, currentContact.role, currentContact.id);
+        
+        if (msg.conversationKey === activeKey) {
+          // Add message to current chat (avoid duplicates)
+          setMessages((prev) =>
+            prev.find((m) => String(m._id) === String(msg._id)) ? prev : [...prev, {
+              ...msg,
+              senderId: String(msg.senderId)
+            }]
+          );
+
+          // Mark as read since chat is open (only for messages from others)
+          if (String(msg.senderId) !== String(me.id)) {
+            fetch(`${API_BASE}/dm/read`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ conversationKey: activeKey, userId: me.id }),
+            }).catch(() => {});
+          }
+          
+          // Refresh inbox after a short delay to update unread count
+          setTimeout(() => loadInboxRef.current(), 100);
+          return;
+        }
+      }
+      
+      // For messages NOT in the open chat, just refresh inbox
+      loadInboxRef.current();
+    });
+
+    socket.on('dm:error', (e) => console.error('[DM]', e.message));
+
+    return () => {
+      socket.off('dm:message');
+      socket.off('dm:error');
+      socket.off('connect');
+      socket.off('disconnect');
+      socket.disconnect();
+    };
+  }, []);
 
   // ── Join ALL existing conversation rooms on load ───────────────
-  // This is what was missing — Cindy needs to join her rooms to receive messages
   useEffect(() => {
     if (!me) return;
     (async () => {
@@ -123,6 +146,7 @@ useEffect(() => {
         if (!data.success) return;
         data.conversations.forEach((conv) => {
           if (!joinedKeysRef.current.has(conv.conversationKey)) {
+            console.log('Joining room:', conv.conversationKey);
             socket.emit('dm:join', {
               myRole: me.role, myId: me.id,
               otherRole: conv.otherRole, otherId: conv.otherId,
@@ -136,7 +160,7 @@ useEffect(() => {
         // silently fail
       }
     })();
-  }, [me]); // eslint-disable-line
+  }, [me]);
 
   // ── Auto-scroll ───────────────────────────────────────────────
   useEffect(() => {
@@ -146,13 +170,13 @@ useEffect(() => {
   // ── Focus inputs ──────────────────────────────────────────────
   useEffect(() => {
     if (screen === 'search') setTimeout(() => searchRef.current?.focus(), 80);
-    if (screen === 'chat')   setTimeout(() => inputRef.current?.focus(), 80);
+    if (screen === 'chat') setTimeout(() => inputRef.current?.focus(), 80);
   }, [screen]);
 
   // ── Reload inbox when opening it ─────────────────────────────
   useEffect(() => {
     if (screen === 'inbox') loadInbox();
-  }, [screen]); // eslint-disable-line
+  }, [screen]);
 
   // ── Debounced search ──────────────────────────────────────────
   useEffect(() => {
@@ -187,6 +211,7 @@ useEffect(() => {
 
     // Join room if not already joined
     if (!joinedKeysRef.current.has(key)) {
+      console.log('Joining room from openChat:', key);
       socket.emit('dm:join', {
         myRole: me.role, myId: me.id,
         otherRole: person.role, otherId: person.id,
@@ -194,50 +219,60 @@ useEffect(() => {
       joinedKeysRef.current.add(key);
     }
 
-    // Mark as read
-    fetch(`${API_BASE}/dm/read`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conversationKey: key, userId: me.id }),
-    }).catch(() => {});
-
-    // Load history
+    // Load history first
     setLoadingHistory(true);
     setMessages([]);
     try {
       const res = await fetch(`${API_BASE}/dm/history?key=${encodeURIComponent(key)}`);
       const data = await res.json();
-      if (data.success) setMessages(data.messages);
-      console.log('Messages received:', data.messages.map(m => ({
-  senderId: m.senderId,
-  senderIdType: typeof m.senderId,
-  senderName: m.senderName,
-  meId: me.id,
-  meIdType: typeof me.id,
-  isMine: String(m.senderId) === String(me.id)
-})));
+      if (data.success) {
+        setMessages(data.messages);
+        console.log('Messages loaded:', data.messages.length);
+      }
     } catch {
       // silently fail
     } finally {
       setLoadingHistory(false);
     }
-    
 
-    // Update unread counts
-    setConversations((prev) =>
-      prev.map((c) => c.conversationKey === key ? { ...c, unreadCount: 0 } : c)
-    );
-    setTotalUnread((prev) => Math.max(0, prev - (conversations.find((c) => c.conversationKey === key)?.unreadCount || 0)));
+    // THEN mark as read after loading history
+    try {
+      await fetch(`${API_BASE}/dm/read`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationKey: key, userId: me.id }),
+      });
+      console.log('Marked messages as read for conversation:', key);
+    } catch (error) {
+      console.error('Failed to mark as read:', error);
+    }
+
+    // Refresh inbox to update unread counts
+    await loadInboxRef.current();
   };
 
   const handleSend = () => {
     const me = meRef.current;
     if (!text.trim() || !me || !contact) return;
+    
+    // Optimistic update for instant feedback
+    const tempMessage = {
+      _id: `temp-${Date.now()}`,
+      senderId: me.id,
+      senderName: me.name,
+      text: text.trim(),
+      createdAt: new Date().toISOString(),
+      isTemp: true
+    };
+    
+    setMessages(prev => [...prev, tempMessage]);
+    
     socket.emit('dm:send', {
       myRole: me.role, myId: me.id, myName: me.name,
       otherRole: contact.role, otherId: contact.id,
       text: text.trim(),
     });
+    
     setText('');
   };
 
@@ -385,13 +420,17 @@ useEffect(() => {
               <div style={s.hint}>Aucun message. Dites bonjour 👋</div>
             )}
             {messages.map((msg, i) => {
+              // Skip temporary messages that have been replaced
+              if (msg.isTemp && messages.some(m => !m.isTemp && m.text === msg.text && String(m.senderId) === String(msg.senderId))) {
+                return null;
+              }
               const isMine = String(msg.senderId) === String(me.id);
               return (
                 <div key={msg._id || i} style={{ ...s.bubble, ...(isMine ? s.mine : s.theirs) }}>
                   {!isMine && <div style={s.senderName}>{msg.senderName}</div>}
                   <div style={{ fontSize: 14, lineHeight: 1.45 }}>{msg.text}</div>
                   <div style={s.time}>
-                    {new Date(msg.createdAt).toLocaleTimeString('fr-FR', {
+                    {msg.isTemp ? '...' : new Date(msg.createdAt).toLocaleTimeString('fr-FR', {
                       hour: '2-digit', minute: '2-digit',
                     })}
                   </div>
