@@ -20,6 +20,7 @@ const Notification = require('./models/Notification');
 const Interview = require('./models/Interview');
 const Chat = require('./models/Chat');
 const CandidateSession = require('./models/CandidateSession');
+const QuizAttempt = require('./models/QuizAttempt');
 
 dotenv.config();
 
@@ -2775,6 +2776,333 @@ app.get('/api/chats/candidate/:candidateId', async (req, res) => {
   }
 });
 
+const quizSessionStore = new Map();
+const QUIZ_SESSION_TTL_MS = 20 * 60 * 1000;
+
+function cleanupQuizSessions() {
+  const now = Date.now();
+  for (const [token, session] of quizSessionStore.entries()) {
+    if (!session || now > session.expiresAt) {
+      quizSessionStore.delete(token);
+    }
+  }
+}
+
+function normalizeDomainLabel(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s+.#-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function inferOfferDomain(offer) {
+  const txt = normalizeDomainLabel([offer?.title, offer?.technicalSkills, offer?.description].filter(Boolean).join(' '));
+  if (!txt) return 'general';
+  if (/react|javascript|typescript|frontend|html|css|node|express|web/.test(txt)) return 'developpement web';
+  if (/python|data|sql|power bi|tableau|analyst|analyse/.test(txt)) return 'data';
+  if (/devops|docker|kubernetes|ci cd|aws|azure|gcp|linux/.test(txt)) return 'devops';
+  if (/mobile|android|ios|flutter|react native/.test(txt)) return 'mobile';
+  if (/qa|test|automation|selenium/.test(txt)) return 'qa';
+  return 'general';
+}
+
+function sanitizeQuizPayload(rawPayload, fallbackDomain) {
+  const root = rawPayload && typeof rawPayload === 'object' ? rawPayload : {};
+  const rawQuestions = Array.isArray(root.questions) ? root.questions : Array.isArray(root) ? root : [];
+
+  const sanitized = rawQuestions
+    .map((q, idx) => {
+      const question = String(q?.question || '').trim();
+      const domain = String(q?.domain || fallbackDomain || 'general').trim().toLowerCase();
+      const optionsRaw = Array.isArray(q?.options) ? q.options : [];
+      const options = optionsRaw
+        .map((opt, optionIdx) => {
+          if (typeof opt === 'string') {
+            return { key: String.fromCharCode(97 + optionIdx), text: opt.trim() };
+          }
+          return {
+            key: String(opt?.key || String.fromCharCode(97 + optionIdx)).trim().toLowerCase(),
+            text: String(opt?.text || '').trim(),
+          };
+        })
+        .filter((opt) => opt.key && opt.text)
+        .slice(0, 6);
+
+      const correctOptionKey = String(q?.correctOptionKey || q?.correct || '').trim().toLowerCase();
+      const validKeys = new Set(options.map((opt) => opt.key));
+      if (!question || options.length < 2 || !validKeys.has(correctOptionKey)) return null;
+
+      return {
+        id: String(q?.id || `q${idx + 1}`).trim() || `q${idx + 1}`,
+        domain,
+        question,
+        options,
+        correctOptionKey,
+      };
+    })
+    .filter(Boolean);
+
+  return sanitized;
+}
+
+function fallbackDynamicQuestionsFromOffer(offer, domain, count) {
+  const title = String(offer?.title || 'ce poste').trim();
+  const skills = splitSkills(offer?.technicalSkills || '').slice(0, 6);
+  const focus = skills.length > 0 ? skills : ['communication', 'resolution de probleme', 'qualite'];
+
+  const templates = focus.flatMap((skill, idx) => {
+    const keyBase = idx + 1;
+    return [
+      {
+        id: `fb-${keyBase}-1`,
+        domain,
+        question: `Pour ${title}, quel est le meilleur usage de ${skill} dans une mission reelle ?`,
+        options: [
+          { key: 'a', text: 'Appliquer des bonnes pratiques et valider le resultat avec des tests.' },
+          { key: 'b', text: 'Ignorer les contraintes et coder sans verification.' },
+          { key: 'c', text: 'Deleguer sans comprendre le besoin metier.' },
+          { key: 'd', text: 'Choisir une solution au hasard.' },
+        ],
+        correctOptionKey: 'a',
+      },
+      {
+        id: `fb-${keyBase}-2`,
+        domain,
+        question: `Quel indicateur montre une bonne maitrise de ${skill} pour ${title} ?`,
+        options: [
+          { key: 'a', text: 'Livrables fiables, documentes et maintenables.' },
+          { key: 'b', text: 'Code non relu et non versionne.' },
+          { key: 'c', text: 'Absence de suivi des erreurs.' },
+          { key: 'd', text: 'Aucune collaboration avec l equipe.' },
+        ],
+        correctOptionKey: 'a',
+      },
+    ];
+  });
+
+  return templates.slice(0, Math.max(3, count));
+}
+
+function getQuizDurationSeconds(count) {
+  return 8 * 60;
+}
+
+async function generateDynamicQuizFromApi({ offer, domain, level, count }) {
+  const prompt = [
+    'Genere uniquement du JSON valide sans markdown.',
+    `Contexte offre: ${JSON.stringify({ title: offer?.title || '', technicalSkills: offer?.technicalSkills || '', description: offer?.description || '', domain, level })}`,
+    `Retourne exactement ${count} questions QCM adaptees a ce domaine et ce poste.`,
+    "Format JSON strict: {\"questions\":[{\"id\":\"q1\",\"domain\":\"...\",\"question\":\"...\",\"options\":[{\"key\":\"a\",\"text\":\"...\"},{\"key\":\"b\",\"text\":\"...\"},{\"key\":\"c\",\"text\":\"...\"},{\"key\":\"d\",\"text\":\"...\"}],\"correctOptionKey\":\"a\"}]}.",
+    'Chaque question doit avoir 4 options minimum et une seule bonne reponse.',
+    'Utilise un francais clair et professionnel.',
+  ].join('\n');
+
+  const messages = [
+    { role: 'system', content: 'Tu es un generateur de quiz technique. Tu dois produire uniquement du JSON valide.' },
+    { role: 'user', content: prompt },
+  ];
+
+  const reply = await getAssistantReplyFromGroq({ messages, maxTokensOverride: 1400 });
+  const parsed = extractJsonFromText(reply);
+  return sanitizeQuizPayload(parsed, domain);
+}
+
+app.get('/api/quizzes/session', async (req, res) => {
+  try {
+    cleanupQuizSessions();
+
+    const jobOfferId = String(req.query.jobOfferId || '').trim();
+    const levelRaw = String(req.query.level || 'junior').trim().toLowerCase();
+    const level = ['junior', 'intermediate', 'senior'].includes(levelRaw) ? levelRaw : 'junior';
+    const count = Math.min(Math.max(parseInt(req.query.count, 10) || 8, 3), 15);
+    const expiresInSeconds = getQuizDurationSeconds(count);
+
+    if (!jobOfferId) {
+      return res.status(400).json({ success: false, message: 'jobOfferId est requis.' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(jobOfferId)) {
+      return res.status(400).json({ success: false, message: 'jobOfferId invalide.' });
+    }
+
+    const offer = await JobOffer.findById(jobOfferId)
+      .select('title technicalSkills description')
+      .lean();
+    if (!offer?._id) {
+      return res.status(404).json({ success: false, message: 'Offre introuvable.' });
+    }
+
+    const domain = inferOfferDomain(offer);
+    let questions = [];
+    try {
+      questions = await generateDynamicQuizFromApi({ offer, domain, level, count });
+    } catch {
+      questions = [];
+    }
+
+    if (questions.length < 3) {
+      questions = fallbackDynamicQuestionsFromOffer(offer, domain, count);
+    }
+
+    const selected = questions.slice(0, count).map((q, idx) => ({ ...q, id: q.id || `q${idx + 1}` }));
+    const quizToken = crypto.randomUUID();
+
+    quizSessionStore.set(quizToken, {
+      jobOfferId: String(offer._id),
+      level,
+      domain,
+      questions: selected,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + expiresInSeconds * 1000,
+    });
+
+    return res.status(200).json({
+      success: true,
+      quizToken,
+      meta: {
+        level,
+        domain,
+        questionCount: selected.length,
+        expiresInSeconds,
+      },
+      questions: selected.map((q) => ({
+        id: q.id,
+        domain: q.domain,
+        question: q.question,
+        options: q.options,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant la generation dynamique du quiz.',
+      error: error.message,
+    });
+  }
+});
+
+app.post('/api/quizzes/submit', async (req, res) => {
+  try {
+    cleanupQuizSessions();
+
+    const candidateId = String(req.body?.candidateId || '').trim();
+    const jobOfferId = String(req.body?.jobOfferId || '').trim();
+    const quizToken = String(req.body?.quizToken || '').trim();
+    const answersRaw = Array.isArray(req.body?.answers) ? req.body.answers : [];
+
+    if (!candidateId || !jobOfferId || !quizToken) {
+      return res.status(400).json({ success: false, message: 'candidateId, jobOfferId et quizToken sont requis.' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(candidateId) || !mongoose.Types.ObjectId.isValid(jobOfferId)) {
+      return res.status(400).json({ success: false, message: 'candidateId ou jobOfferId invalide.' });
+    }
+
+    const session = quizSessionStore.get(quizToken);
+    if (!session || Date.now() > session.expiresAt) {
+      quizSessionStore.delete(quizToken);
+      return res.status(400).json({ success: false, message: 'Session de quiz expirée. Rechargez le quiz.' });
+    }
+    if (String(session.jobOfferId) !== jobOfferId) {
+      return res.status(400).json({ success: false, message: 'Session de quiz non valide pour cette offre.' });
+    }
+
+    const answers = answersRaw
+      .map((a) => ({
+        questionId: String(a?.questionId || '').trim(),
+        selectedOptionKey: String(a?.selectedOptionKey || '').trim().toLowerCase(),
+      }))
+      .filter((a) => a.questionId);
+
+    if (answers.length === 0) {
+      return res.status(400).json({ success: false, message: 'Aucune reponse valide envoyee.' });
+    }
+
+    let correctAnswers = 0;
+    const questionSnapshots = [];
+
+    for (const q of session.questions) {
+      const answer = answers.find((a) => a.questionId === String(q.id));
+      const validOptionKeys = new Set((q.options || []).map((opt) => String(opt.key || '').toLowerCase()));
+      const selectedOptionKey = answer && validOptionKeys.has(answer.selectedOptionKey)
+        ? answer.selectedOptionKey
+        : 'none';
+
+      const correct = String(q.correctOptionKey || '').toLowerCase();
+      const isCorrect = selectedOptionKey === correct;
+      if (isCorrect) correctAnswers += 1;
+
+      questionSnapshots.push({
+        questionId: String(q.id),
+        domain: String(q.domain || session.domain || ''),
+        question: String(q.question || ''),
+        options: (q.options || []).map((opt) => ({ key: opt.key, text: opt.text })),
+        selectedOptionKey,
+        correctOptionKey: correct,
+        isCorrect,
+      });
+    }
+
+    if (questionSnapshots.length === 0) {
+      return res.status(400).json({ success: false, message: 'Reponses invalides pour ce quiz.' });
+    }
+
+    const totalQuestions = questionSnapshots.length;
+    const scorePercent = Math.round((correctAnswers * 100) / totalQuestions);
+
+    const attempt = await QuizAttempt.create({
+      candidateId,
+      jobOfferId,
+      domain: session.domain,
+      level: session.level,
+      totalQuestions,
+      correctAnswers,
+      scorePercent,
+      questions: questionSnapshots,
+    });
+
+    quizSessionStore.delete(quizToken);
+
+    return res.status(201).json({
+      success: true,
+      attemptId: String(attempt._id),
+      scorePercent,
+      correctAnswers,
+      totalQuestions,
+      message: 'Quiz corrige automatiquement avec succes.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant la correction du quiz.',
+      error: error.message,
+    });
+  }
+});
+
+app.get('/api/quizzes/attempts/candidate/:candidateId', async (req, res) => {
+  try {
+    const { candidateId } = req.params;
+    if (!candidateId || !mongoose.Types.ObjectId.isValid(candidateId)) {
+      return res.status(400).json({ success: false, message: 'candidateId invalide.' });
+    }
+
+    const attempts = await QuizAttempt.find({ candidateId })
+      .populate('jobOfferId', 'title location contractType')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.status(200).json({ success: true, attempts });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant la recuperation des quiz candidats.',
+      error: error.message,
+    });
+  }
+});
+
 app.get('/api/offers', async (req, res) => {
   try {
     const { recruiterId } = req.query;
@@ -2832,12 +3160,21 @@ app.get('/api/offers/match/:candidateId', async (req, res) => {
     const offers = await JobOffer.find({ status: 'published' })
       .sort({ createdAt: -1 })
       .limit(limit)
-      .select('_id title location workMode contractType salary description createdAt')
+      .select('_id title location workMode contractType salary experienceRequired languagesRequired technicalSkills description createdAt')
       .lean();
 
     // Build a lightweight corpus-based similarity (TF-IDF + cosine), no training required.
     const offerDocs = offers.map((offer) => {
-      const offerText = [offer.title, offer.location, offer.workMode, offer.contractType, offer.description]
+      const offerText = [
+        offer.title,
+        offer.location,
+        offer.workMode,
+        offer.contractType,
+        offer.experienceRequired,
+        offer.languagesRequired,
+        offer.technicalSkills,
+        offer.description,
+      ]
         .map((x) => String(x || '').trim())
         .filter(Boolean)
         .join('\n');
@@ -2888,7 +3225,7 @@ app.get('/api/offers/match/:candidateId', async (req, res) => {
 
 app.post('/api/offers', async (req, res) => {
   try {
-    const { recruiterId, title, location, workMode, contractType, salary, description } = req.body;
+    const { recruiterId, title, location, workMode, contractType, salary, experienceRequired, languagesRequired, technicalSkills, description } = req.body;
 
     if (!recruiterId || !title || !location || !workMode || !contractType || !description) {
       return res.status(400).json({
@@ -2912,6 +3249,9 @@ app.post('/api/offers', async (req, res) => {
       workMode,
       contractType,
       salary: salary || '',
+      experienceRequired: experienceRequired || '',
+      languagesRequired: languagesRequired || '',
+      technicalSkills: technicalSkills || '',
       description,
       status: 'published',
     });
@@ -2933,7 +3273,7 @@ app.post('/api/offers', async (req, res) => {
 app.put('/api/offers/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { recruiterId, title, location, workMode, contractType, salary, description } = req.body;
+    const { recruiterId, title, location, workMode, contractType, salary, experienceRequired, languagesRequired, technicalSkills, description } = req.body;
 
     if (!recruiterId || !title || !location || !workMode || !contractType || !description) {
       return res.status(400).json({
@@ -2955,6 +3295,9 @@ app.put('/api/offers/:id', async (req, res) => {
     offer.workMode = workMode;
     offer.contractType = contractType;
     offer.salary = salary || '';
+    offer.experienceRequired = experienceRequired || '';
+    offer.languagesRequired = languagesRequired || '';
+    offer.technicalSkills = technicalSkills || '';
     offer.description = description;
     await offer.save();
 
@@ -3008,7 +3351,7 @@ app.delete('/api/offers/:id', async (req, res) => {
 // Candidacy routes
 app.post('/api/candidacies', async (req, res) => {
   try {
-    const { candidateId, jobOfferId, cvId } = req.body;
+    const { candidateId, jobOfferId, cvId, quizAttemptId } = req.body;
     if (!candidateId || !jobOfferId) {
       return res.status(400).json({
         success: false,
@@ -3040,7 +3383,36 @@ app.post('/api/candidacies', async (req, res) => {
       if (cv?._id) effectiveCvId = cv._id;
     }
 
-    const candidacy = new Candidacy({ candidateId, jobOfferId, cvId: effectiveCvId });
+    let effectiveQuizAttemptId = null;
+    let effectiveQuizScore = null;
+    if (quizAttemptId) {
+      if (!mongoose.Types.ObjectId.isValid(String(quizAttemptId))) {
+        return res.status(400).json({ success: false, message: 'quizAttemptId invalide.' });
+      }
+
+      const attempt = await QuizAttempt.findOne({
+        _id: quizAttemptId,
+        candidateId,
+        jobOfferId,
+      })
+        .select('_id scorePercent')
+        .lean();
+
+      if (!attempt?._id) {
+        return res.status(404).json({ success: false, message: 'Tentative quiz introuvable pour cette candidature.' });
+      }
+
+      effectiveQuizAttemptId = attempt._id;
+      effectiveQuizScore = Number.isFinite(attempt.scorePercent) ? attempt.scorePercent : null;
+    }
+
+    const candidacy = new Candidacy({
+      candidateId,
+      jobOfferId,
+      cvId: effectiveCvId,
+      quizAttemptId: effectiveQuizAttemptId,
+      quizScore: effectiveQuizScore,
+    });
     await candidacy.save();
 
     res.status(201).json({

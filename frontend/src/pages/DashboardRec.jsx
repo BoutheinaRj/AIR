@@ -12,6 +12,9 @@ const emptyOfferForm = {
 	workMode: 'onsite',
 	contractType: '',
 	salary: '',
+	experienceRequired: '',
+	languagesRequired: '',
+	technicalSkills: '',
 	description: '',
 }
 
@@ -25,6 +28,41 @@ const emptyInterviewForm = {
 	meetingLink: '',
 	location: '',
 	notes: '',
+}
+
+const BarChart = ({ values, labels, height = 140 }) => {
+	const width = 560
+	const padding = { top: 12, right: 12, bottom: 28, left: 28 }
+	const v = Array.isArray(values) ? values.map((x) => (Number.isFinite(x) ? x : 0)) : []
+	const maxVal = Math.max(1, ...v)
+	const innerW = width - padding.left - padding.right
+	const innerH = height - padding.top - padding.bottom
+	const barW = v.length ? innerW / v.length : innerW
+
+	return (
+		<div className='w-full overflow-x-auto'>
+			<svg viewBox={`0 0 ${width} ${height}`} className='w-full min-w-[520px]'>
+				<line x1={padding.left} y1={padding.top + innerH} x2={width - padding.right} y2={padding.top + innerH} stroke='#e2e8f0' strokeWidth='1' />
+				{v.map((val, idx) => {
+					const h = (val / maxVal) * innerH
+					const x = padding.left + idx * barW + barW * 0.15
+					const y = padding.top + innerH - h
+					const w = barW * 0.7
+					const label = Array.isArray(labels) ? labels[idx] : String(idx)
+					return (
+						<g key={`bar-${label}`}>
+							<rect x={x} y={y} width={w} height={h} rx='4' fill={val > 0 ? '#06d5e0' : '#cbd5e1'} opacity={val > 0 ? 0.9 : 0.55} />
+							{idx % 3 === 0 ? (
+								<text x={x + w / 2} y={height - 10} textAnchor='middle' fontSize='10' fill='#64748b'>
+									{label}
+								</text>
+							) : null}
+						</g>
+					)
+				})}
+			</svg>
+		</div>
+	)
 }
 
 function DashboardRec() {
@@ -373,46 +411,89 @@ function DashboardRec() {
 	const candidaciesTrend = useMemo(() => {
 		const labels = []
 		const counts = []
+		const prevCounts = []
 		const now = new Date()
 		now.setHours(0, 0, 0, 0)
 
-		for (let i = 6; i >= 0; i -= 1) {
-			const day = new Date(now)
-			day.setDate(now.getDate() - i)
+		const countForDay = (day) => {
 			const dayKey = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
-
-			const count = candidacies.filter((c) => {
+			return candidacies.filter((c) => {
 				if (!c?.createdAt) return false
 				const createdAt = new Date(c.createdAt)
 				if (Number.isNaN(createdAt.getTime())) return false
 				const createdKey = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, '0')}-${String(createdAt.getDate()).padStart(2, '0')}`
 				return createdKey === dayKey
 			}).length
+		}
+
+		for (let i = 6; i >= 0; i -= 1) {
+			const day = new Date(now)
+			day.setDate(now.getDate() - i)
+			const prevDay = new Date(day)
+			prevDay.setDate(day.getDate() - 7)
+
+			const count = countForDay(day)
+			const prevCount = countForDay(prevDay)
 
 			labels.push(day.toLocaleDateString('fr-FR', { weekday: 'short' }))
 			counts.push(count)
+			prevCounts.push(prevCount)
 		}
 
-		const maxCount = Math.max(1, ...counts)
+		const maxCount = Math.max(1, ...counts, ...prevCounts)
 		const chartWidth = 640
 		const chartHeight = 180
-		const points = counts
-			.map((count, idx) => {
-				const x = (idx / (counts.length - 1)) * chartWidth
-				const y = chartHeight - (count / maxCount) * (chartHeight - 20)
-				return `${x},${y}`
-			})
-			.join(' ')
+		const toY = (val) => chartHeight - (val / maxCount) * (chartHeight - 20)
+		const pointsData = counts.map((count, idx) => ({
+			x: (idx / (counts.length - 1)) * chartWidth,
+			y: toY(count),
+			value: count,
+			label: labels[idx],
+		}))
+		const prevPointsData = prevCounts.map((count, idx) => ({
+			x: (idx / (prevCounts.length - 1)) * chartWidth,
+			y: toY(count),
+			value: count,
+			label: labels[idx],
+		}))
+		const points = pointsData.map((p) => `${p.x},${p.y}`).join(' ')
+		const prevPoints = prevPointsData.map((p) => `${p.x},${p.y}`).join(' ')
+		const areaPath = pointsData.length
+			? `M ${pointsData.map((p) => `${p.x},${p.y}`).join(' L ')} L ${pointsData.at(-1).x},${chartHeight - 1} L ${pointsData[0].x},${chartHeight - 1} Z`
+			: ''
 
 		return {
 			labels,
 			counts,
+			prevCounts,
 			maxCount,
 			points,
+			prevPoints,
+			pointsData,
+			prevPointsData,
+			areaPath,
 			chartWidth,
 			chartHeight,
 		}
 	}, [candidacies])
+
+	const recruiterLoginHours = useMemo(() => {
+		const counts = Array.from({ length: 24 }, () => 0)
+		const labels = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}h`)
+
+		const registerHour = (value) => {
+			if (!value) return
+			const d = new Date(value)
+			if (Number.isNaN(d.getTime())) return
+			counts[d.getHours()] += 1
+		}
+
+		offers.forEach((o) => registerHour(o?.createdAt || o?.updatedAt))
+		candidacies.forEach((c) => registerHour(c?.createdAt || c?.updatedAt))
+		interviews.forEach((i) => registerHour(i?.createdAt || i?.scheduledAt))
+
+		return { labels, values: counts }
+	}, [offers, candidacies, interviews])
 
 	const candidaciesByOffer = useMemo(() => {
 		const groups = new Map()
@@ -558,6 +639,9 @@ function DashboardRec() {
 			workMode: offer.workMode || 'onsite',
 			contractType: offer.contractType || '',
 			salary: offer.salary || '',
+			experienceRequired: offer.experienceRequired || '',
+			languagesRequired: offer.languagesRequired || '',
+			technicalSkills: offer.technicalSkills || '',
 			description: offer.description || '',
 		})
 	}
@@ -582,6 +666,9 @@ function DashboardRec() {
 				workMode: offerForm.workMode,
 				contractType: offerForm.contractType,
 				salary: offerForm.salary,
+				experienceRequired: offerForm.experienceRequired,
+				languagesRequired: offerForm.languagesRequired,
+				technicalSkills: offerForm.technicalSkills,
 				description: offerForm.description,
 			}
 
@@ -982,6 +1069,70 @@ function DashboardRec() {
 
 	const getExtractionLabel = (label) => extractionLabelMap[label] || String(label || '').replace(/_/g, ' ')
 
+	const normalizeOfferSectionTitle = (rawTitle) => {
+		const normalized = String(rawTitle || '')
+			.toLowerCase()
+			.normalize('NFD')
+			.replace(/[\u0300-\u036f]/g, '')
+			.trim()
+
+		if (normalized.includes('experience')) return 'Experience'
+		if (normalized.includes('mission') || normalized.includes('responsabilite') || normalized.includes('tache')) return 'Missions'
+		if (normalized.includes('competence') || normalized.includes('skill') || normalized.includes('stack')) return 'Competences'
+		if (normalized.includes('langue') || normalized.includes('language')) return 'Langues'
+		if (normalized.includes('profil') || normalized.includes('candidat')) return 'Profil'
+		if (normalized.includes('avantage') || normalized.includes('benefice')) return 'Avantages'
+		if (normalized.includes('formation') || normalized.includes('diplome') || normalized.includes('education')) return 'Formation'
+
+		return String(rawTitle || 'Details').trim()
+	}
+
+	const parseOfferDescriptionSections = (rawDescription) => {
+		const text = String(rawDescription || '').replace(/\r/g, '').trim()
+		if (!text) return []
+
+		const headingRegex = /(?:^|\n)\s*([A-Za-z0-9'\-\s\/]{2,40})\s*:\s*/g
+		const headingMatches = Array.from(text.matchAll(headingRegex))
+
+		if (headingMatches.length === 0) {
+			return [
+				{
+					title: 'Description',
+					items: [text],
+				},
+			]
+		}
+
+		const sections = []
+
+		headingMatches.forEach((match, index) => {
+			const title = normalizeOfferSectionTitle(match[1])
+			const start = (match.index || 0) + match[0].length
+			const end = index + 1 < headingMatches.length ? headingMatches[index + 1].index || text.length : text.length
+			const sectionBody = text.slice(start, end).trim()
+			if (!sectionBody) return
+
+			const items = sectionBody
+				.split(/\n|•|;|\u2022/g)
+				.map((item) => item.trim())
+				.filter(Boolean)
+
+			sections.push({
+				title,
+				items: items.length > 0 ? items : [sectionBody],
+			})
+		})
+
+		return sections.length > 0
+			? sections
+			: [
+					{
+						title: 'Description',
+						items: [text],
+					},
+				]
+	}
+
 	const handleMenuClick = (itemKey) => {
 		if (itemKey === 'dashboard' || itemKey === 'offers' || itemKey === 'interviews' || itemKey === 'candidates' || itemKey === 'company' || itemKey === 'settings') {
 			setSelectedView(itemKey)
@@ -1015,7 +1166,7 @@ function DashboardRec() {
 
 	return (
 		<section className='min-h-screen bg-gradient-to-br from-[#eaf8ff] via-[#f3fbff] to-[#eef4ff]' style={{ fontFamily: "'Jost', sans-serif" }}>
-			<div className='mx-auto flex min-h-screen max-w-[1600px]'>
+			<div className='flex min-h-screen w-full'>
 				<aside className='w-[286px] shrink-0 bg-gradient-to-b from-[#051a3d] via-[#072a56] to-[#083d69] px-4 py-6 text-white'>
 					<div className='mb-2 flex items-center justify-center px-2'>
 						<button
@@ -1024,27 +1175,25 @@ function DashboardRec() {
 							className='cursor-pointer'
 							aria-label='Aller a l accueil'
 						>
-							<img src={assets.logo} alt='AIR logo' className='h-32 w-auto object-contain' />
+							<img src={assets.logo} alt='AIR logo' className='h-28 w-auto object-contain' />
 						</button>
 					</div>
 
-					<div className='rounded-2xl border border-cyan-200/20 bg-white/10 p-3 shadow-[0_10px_30px_rgba(0,0,0,0.25)] backdrop-blur-sm'>
-						<div className='flex items-center gap-2'>
-							{recruiterAvatar ? (
-								<img src={recruiterAvatar} alt='Profil recruteur' className='h-12 w-12 rounded-full object-cover ring-2 ring-cyan-300/40' />
-							) : (
-								<div className='flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-[#00d4ff] to-[#1f7bff] text-base font-bold'>
-									{recruiterInitials}
-								</div>
-							)}
-							<div className='min-w-0'>
-								<p className='truncate text-[19px] leading-5 font-bold text-white'>{recruiterFullName}</p>
-								<div className='mt-1 flex items-center gap-2'>
-									<span className='text-xs text-cyan-100/90'>Recruteur - {recruiter.company}</span>
-									<span className='rounded-full bg-cyan-100 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-wide text-[#045d7a]'>
-										Recruteur
-									</span>
-								</div>
+					<div className='flex items-center gap-3'>
+						{recruiterAvatar ? (
+							<img src={recruiterAvatar} alt='Profil recruteur' className='h-12 w-12 rounded-full object-cover ring-2 ring-cyan-300/40' />
+						) : (
+							<div className='flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-[#00d4ff] to-[#1f7bff] text-base font-bold'>
+								{recruiterInitials}
+							</div>
+						)}
+						<div className='min-w-0'>
+							<p className='truncate text-[19px] leading-5 font-bold text-white'>{recruiterFullName}</p>
+							<div className='mt-1 flex items-center gap-2'>
+								<span className='truncate text-xs text-cyan-100/90'>Recruteur - {recruiter.company}</span>
+								<span className='shrink-0 rounded-full bg-cyan-100 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-wide text-[#045d7a]'>
+									Recruteur
+								</span>
 							</div>
 						</div>
 					</div>
@@ -1087,14 +1236,13 @@ function DashboardRec() {
 
 				<main className='flex-1 p-6'>
 					<div className='h-full rounded-3xl border border-[#cfe7f9] bg-white p-6 shadow-[0_15px_40px_rgba(8,51,93,0.08)]'>
-						<div className='flex flex-col gap-3 md:flex-row md:items-start md:justify-between'>
+						<div className='flex flex-wrap items-start justify-between gap-4'>
 							<p style={{ fontFamily: "'Jost', sans-serif" }} className='text-4xl font-black text-[#000000]'>Bienvenue 👋</p>
-							<div className='inline-flex items-center gap-2 self-start rounded-2xl border border-cyan-200 bg-cyan-50/60 px-3 py-1.5 text-sm font-semibold text-cyan-900'>
-								<span className='relative flex h-2 w-2'>
-									<span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-500 opacity-75' />
-									<span className='relative inline-flex h-2 w-2 rounded-full bg-cyan-600' />
+							<div className='flex items-center gap-3'>
+								<span className='inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-semibold text-[#0a5f88]'>
+									<span className='h-2 w-2 animate-pulse rounded-full bg-[#06d5e0]' />
+									{formattedTime}
 								</span>
-								<span>{formattedTime}</span>
 							</div>
 						</div>
 						<p className='mt-2 text-base text-[#36648b]'>
@@ -1107,57 +1255,109 @@ function DashboardRec() {
 						{selectedView === 'dashboard' ? (
 							<div className='mt-6 space-y-4'>
 								<div className='grid gap-4 md:grid-cols-2'>
-									<div className='rounded-2xl border border-blue-100 bg-gradient-to-br from-[#edf4ff] to-[#dfeeff] p-4'>
-										<p className='text-sm font-semibold text-[#2b5f9a]'>Offres publiees</p>
-										<p className='mt-1 text-3xl font-black text-[#163f73]'>{stats.total}</p>
+									<div className='overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_12px_34px_rgba(8,51,93,0.07),0_0_0_1px_rgba(14,165,233,0.28),0_0_22px_rgba(6,182,212,0.24)]'>
+										<div className='h-1.5 bg-gradient-to-r from-[#0ea5e9] via-[#06b6d4] to-[#1d4ed8]' />
+										<div className='p-4'>
+											<p className='text-[11px] font-black uppercase tracking-[0.16em] text-[#5b7f9d]'>Offres publiees</p>
+											<div className='mt-2 flex items-end justify-between gap-3'>
+												<p className='text-3xl font-black text-slate-900'>{stats.total}</p>
+												<span className='rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[11px] font-semibold text-cyan-700'>Actives</span>
+											</div>
+										</div>
 									</div>
-									<div className='rounded-2xl border border-cyan-100 bg-gradient-to-br from-[#f0fbff] to-[#dff7ff] p-4'>
-										<p className='text-sm font-semibold text-[#0a6a8f]'>Candidatures recues</p>
-										<p className='mt-1 text-3xl font-black text-[#083969]'>{stats.candidacies}</p>
+									<div className='overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_12px_34px_rgba(8,51,93,0.07),0_0_0_1px_rgba(14,165,233,0.28),0_0_22px_rgba(6,182,212,0.24)]'>
+										<div className='h-1.5 bg-gradient-to-r from-[#1d4ed8] via-[#0ea5e9] to-[#06b6d4]' />
+										<div className='p-4'>
+											<p className='text-[11px] font-black uppercase tracking-[0.16em] text-[#5b7f9d]'>Candidatures recues</p>
+											<div className='mt-2 flex items-end justify-between gap-3'>
+												<p className='text-3xl font-black text-slate-900'>{stats.candidacies}</p>
+											</div>
+										</div>
 									</div>
 								</div>
 
 								<div className='grid gap-4 xl:grid-cols-[1.35fr_1fr]'>
-									<div className='rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-4'>
-										<div className='mb-2'>
-											<h2 className='text-lg font-black text-[#0d355b]'>Courbe des candidatures recues</h2>
-											<p className='mt-1 text-xs text-[#4f7191]'>Evolution sur les 7 derniers jours.</p>
-										</div>
+									<div className='overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_14px_38px_rgba(8,51,93,0.08),0_0_0_1px_rgba(14,165,233,0.3),0_0_24px_rgba(29,78,216,0.2)]'>
+										<div className='h-1 bg-gradient-to-r from-[#0ea5e9] via-[#06b6d4] to-[#1d4ed8]' />
+										<div className='p-4'>
+											<div className='mb-3 flex items-start justify-between gap-3'>
+												<div>
+													<p className='text-[11px] font-black uppercase tracking-[0.16em] text-[#5b7f9d]'>Performance</p>
+													<h2 className='mt-1 text-lg font-black text-[#0d355b]'>Courbe des candidatures recues</h2>
+													<p className='mt-1 text-xs text-[#4f7191]'>Evolution sur 7 jours avec comparaison semaine precedente.</p>
+												</div>
+													<div className='flex items-center gap-3 text-[11px] font-semibold text-slate-600'>
+														<span className='inline-flex items-center gap-1.5'>
+															<span className='h-2.5 w-2.5 rounded-full bg-cyan-500' />
+															Cette semaine
+														</span>
+														<span className='inline-flex items-center gap-1.5'>
+															<span className='h-2.5 w-2.5 rounded-full border border-blue-400 bg-blue-100' />
+															Semaine precedente
+														</span>
+													</div>
+											</div>
 
-										<div className='overflow-x-auto rounded-xl border border-slate-200 bg-white p-2.5'>
+										<div className='overflow-x-auto rounded-2xl border border-cyan-100 bg-gradient-to-b from-[#f7fcff] to-white p-3'>
 											<svg
 												viewBox={`0 0 ${candidaciesTrend.chartWidth} ${candidaciesTrend.chartHeight}`}
 												className='h-[185px] w-full min-w-[520px]'
 												preserveAspectRatio='none'
 											>
-												<line x1='0' y1={candidaciesTrend.chartHeight - 1} x2={candidaciesTrend.chartWidth} y2={candidaciesTrend.chartHeight - 1} stroke='#dbe7f3' strokeWidth='1.5' />
+												<defs>
+													<linearGradient id='recCandLine' x1='0' y1='0' x2='1' y2='0'>
+														<stop offset='0%' stopColor='#0ea5e9' />
+														<stop offset='100%' stopColor='#1d4ed8' />
+													</linearGradient>
+													<linearGradient id='recCandArea' x1='0' y1='0' x2='0' y2='1'>
+														<stop offset='0%' stopColor='#06b6d4' stopOpacity='0.28' />
+														<stop offset='100%' stopColor='#06b6d4' stopOpacity='0.02' />
+													</linearGradient>
+												</defs>
+												<line x1='0' y1={candidaciesTrend.chartHeight - 1} x2={candidaciesTrend.chartWidth} y2={candidaciesTrend.chartHeight - 1} stroke='#d7e9f8' strokeWidth='1.5' />
+												{candidaciesTrend.areaPath ? <path d={candidaciesTrend.areaPath} fill='url(#recCandArea)' /> : null}
 												<polyline
 													fill='none'
-													stroke='#0891b2'
-													strokeWidth='3'
+													stroke='#7dd3fc'
+													strokeWidth='2.5'
+													strokeDasharray='5 4'
+													strokeLinecap='round'
+													strokeLinejoin='round'
+													points={candidaciesTrend.prevPoints}
+												/>
+												<polyline
+													fill='none'
+													stroke='url(#recCandLine)'
+													strokeWidth='3.5'
 													strokeLinecap='round'
 													strokeLinejoin='round'
 													points={candidaciesTrend.points}
 												/>
-												{candidaciesTrend.counts.map((count, idx) => {
-													const x = (idx / (candidaciesTrend.counts.length - 1)) * candidaciesTrend.chartWidth
-													const y = candidaciesTrend.chartHeight - (count / candidaciesTrend.maxCount) * (candidaciesTrend.chartHeight - 20)
-													return <circle key={`${candidaciesTrend.labels[idx]}-${idx}`} cx={x} cy={y} r='4.5' fill='#0e7490' />
-												})}
+												{candidaciesTrend.prevPointsData.map((p, idx) => (
+													<circle key={`prev-${candidaciesTrend.labels[idx]}-${idx}`} cx={p.x} cy={p.y} r='3.2' fill='#dbeafe' stroke='#60a5fa' strokeWidth='1.5'>
+														<title>{`${p.label}: ${p.value} candidature(s) - semaine precedente`}</title>
+													</circle>
+												))}
+												{candidaciesTrend.pointsData.map((p, idx) => (
+													<circle key={`${candidaciesTrend.labels[idx]}-${idx}`} cx={p.x} cy={p.y} r='4.5' fill='#ffffff' stroke='#0ea5e9' strokeWidth='2.5'>
+														<title>{`${p.label}: ${p.value} candidature(s) - cette semaine`}</title>
+													</circle>
+												))}
 											</svg>
 
-											<div className='mt-2 grid grid-cols-7 gap-1.5'>
+											<div className='mt-3 grid grid-cols-7 gap-1.5'>
 												{candidaciesTrend.labels.map((label, idx) => (
 													<div key={`${label}-${idx}`} className='text-center'>
-														<p className='text-[10px] font-semibold uppercase text-[#4f7191]'>{label}</p>
-														<p className='text-xs font-bold text-[#0d355b]'>{candidaciesTrend.counts[idx]}</p>
+														<p className='text-[10px] font-semibold uppercase text-[#5b7f9d]'>{label}</p>
+														<p className='text-xs font-black text-[#0d355b]'>{candidaciesTrend.counts[idx]}</p>
 													</div>
 												))}
 											</div>
 										</div>
+										</div>
 									</div>
 
-									<div className='rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-4'>
+									<div className='rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.28),0_10px_26px_rgba(14,165,233,0.14),0_0_20px_rgba(6,182,212,0.2)]'>
 										<div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
 											<div>
 												<h2 className='text-lg font-black text-[#0d355b]'>Calendrier des rendez-vous</h2>
@@ -1167,7 +1367,7 @@ function DashboardRec() {
 												<button
 													type='button'
 													onClick={goToPreviousMonth}
-													className='rounded-lg border border-slate-300 px-2.5 py-1 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+													className='rounded-lg border border-cyan-300 bg-white px-2.5 py-1 text-sm font-semibold text-[#0a5f88] transition hover:bg-cyan-50'
 												>
 													←
 												</button>
@@ -1175,7 +1375,7 @@ function DashboardRec() {
 												<button
 													type='button'
 													onClick={goToNextMonth}
-													className='rounded-lg border border-slate-300 px-2.5 py-1 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+													className='rounded-lg border border-cyan-300 bg-white px-2.5 py-1 text-sm font-semibold text-[#0a5f88] transition hover:bg-cyan-50'
 												>
 													→
 												</button>
@@ -1208,13 +1408,23 @@ function DashboardRec() {
 									</div>
 								</div>
 
-								<div className='rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-5'>
+								<div className='rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.28),0_10px_26px_rgba(14,165,233,0.14),0_0_20px_rgba(6,182,212,0.2)]'>
+									<div className='flex flex-wrap items-end justify-between gap-2'>
+										<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>HISTOGRAMME: HEURES DE CONNEXION</p>
+										<p className='text-xs font-semibold text-slate-500'>Activites enregistrees par heure</p>
+									</div>
+									<div className='mt-3'>
+										<BarChart values={recruiterLoginHours.values} labels={recruiterLoginHours.labels} />
+									</div>
+								</div>
+
+								<div className='rounded-2xl border border-slate-200 bg-[#fbfdff] p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.28),0_10px_26px_rgba(14,165,233,0.14),0_0_20px_rgba(6,182,212,0.2)]'>
 									<div className='flex flex-wrap items-center justify-between gap-3'>
 										<h2 className='text-xl font-black text-[#0d355b]'>Dernieres offres</h2>
 										<button
 											type='button'
 											onClick={() => setSelectedView('offers')}
-											className='rounded-xl border border-[#0a7aa2] px-4 py-2 text-sm font-semibold text-[#0a5f88] transition hover:bg-[#ebfaff]'
+											className='rounded-xl border border-cyan-300 bg-white px-4 py-2 text-sm font-semibold text-[#0a5f88] transition hover:bg-cyan-50'
 										>
 											Publier une nouvelle offre
 										</button>
@@ -1235,7 +1445,7 @@ function DashboardRec() {
 														<button
 															type='button'
 															onClick={() => handleEditOffer(offer)}
-															className='rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-[#305b81] hover:bg-slate-50'
+															className='rounded-lg border border-cyan-300 bg-white px-3 py-1 text-xs font-semibold text-[#0a5f88] transition hover:bg-cyan-50'
 														>
 															Modifier
 														</button>
@@ -1248,7 +1458,8 @@ function DashboardRec() {
 							</div>
 						) : selectedView === 'offers' ? (
 							<div className='mt-8 grid gap-6 lg:grid-cols-2'>
-								<div className='rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-5'>
+								<div className='overflow-hidden rounded-2xl border border-cyan-100 bg-[#fbfdff] p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.28),0_10px_26px_rgba(14,165,233,0.14),0_0_20px_rgba(6,182,212,0.2)]'>
+									<div className='-mx-5 -mt-5 mb-4 h-1 bg-gradient-to-r from-[#06b6d4] via-[#0ea5e9] to-[#1d4ed8]' />
 									<h2 className='text-xl font-black text-[#0d355b]'>{offerForm.id ? 'Modifier une offre' : 'Publier une offre'}</h2>
 									<p className='mt-1 text-sm text-[#4f7191]'>
 										Titre, localisation, remote/presentiel/hybride, salaire optionnel et description.
@@ -1290,6 +1501,24 @@ function DashboardRec() {
 											value={offerForm.salary}
 											onChange={(e) => updateOfferField('salary', e.target.value)}
 										/>
+										<input
+											className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-500'
+											placeholder='Experience requise (ex: 2+ ans en dev web)'
+											value={offerForm.experienceRequired}
+											onChange={(e) => updateOfferField('experienceRequired', e.target.value)}
+										/>
+										<input
+											className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-500'
+											placeholder='Langues et niveau (ex: Francais C1, Anglais B2)'
+											value={offerForm.languagesRequired}
+											onChange={(e) => updateOfferField('languagesRequired', e.target.value)}
+										/>
+										<input
+											className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-500'
+											placeholder='Competences techniques (ex: React, Node.js, Python)'
+											value={offerForm.technicalSkills}
+											onChange={(e) => updateOfferField('technicalSkills', e.target.value)}
+										/>
 										<textarea
 											className='min-h-[130px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-500'
 											placeholder='Description du poste'
@@ -1301,15 +1530,15 @@ function DashboardRec() {
 											<button
 												type='submit'
 												disabled={savingOffer}
-												className='rounded-xl bg-gradient-to-r from-[#0a4a72] to-[#0a7aa2] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60'
+												className='rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60'
 											>
-												{savingOffer ? 'Enregistrement...' : offerForm.id ? 'Enregistrer la modification' : 'Publier l offre'}
+												{savingOffer ? 'Enregistrement...' : offerForm.id ? 'Enregistrer la modification' : 'Publier l\'offre'}
 											</button>
 											{offerForm.id ? (
 												<button
 													type='button'
 													onClick={resetOfferForm}
-													className='rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+													className='rounded-xl border border-cyan-300 bg-white px-5 py-2.5 text-sm font-semibold text-[#0a5f88] transition hover:bg-cyan-50'
 												>
 													Annuler
 												</button>
@@ -1318,7 +1547,8 @@ function DashboardRec() {
 									</form>
 								</div>
 
-								<div className='rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-5'>
+								<div className='overflow-hidden rounded-2xl border border-cyan-100 bg-[#fbfdff] p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.28),0_10px_26px_rgba(14,165,233,0.14),0_0_20px_rgba(6,182,212,0.2)]'>
+									<div className='-mx-5 -mt-5 mb-4 h-1 bg-gradient-to-r from-[#06b6d4] via-[#0ea5e9] to-[#1d4ed8]' />
 									<h2 className='text-xl font-black text-[#0d355b]'>Offres publiees</h2>
 									<p className='mt-1 text-sm text-[#4f7191]'>Vous pouvez voir, modifier et supprimer vos offres.</p>
 
@@ -1329,8 +1559,10 @@ function DashboardRec() {
 
 									{!loadingOffers && offers.length > 0 ? (
 										<div className='mt-4 space-y-3'>
-											{offers.map((offer) => (
-												<div key={offer._id} className='rounded-xl border border-slate-200 bg-white p-3'>
+											{offers.map((offer) => {
+												const descriptionSections = parseOfferDescriptionSections(offer.description)
+												return (
+												<div key={offer._id} className='rounded-xl border border-cyan-100 bg-gradient-to-br from-[#f8fdff] via-white to-[#f3fbff] p-3 shadow-[0_0_0_1px_rgba(14,165,233,0.12)]'>
 													<div className='flex items-start justify-between gap-3'>
 														<div>
 															<p className='text-sm font-bold text-[#103b62]'>{offer.title}</p>
@@ -1341,12 +1573,51 @@ function DashboardRec() {
 														</div>
 														<span className='rounded-full bg-cyan-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#0a6a8f]'>Publiee</span>
 													</div>
-													<p className='mt-2 text-xs text-[#456786]'>{offer.description}</p>
+
+													<div className='mt-3 grid gap-2 sm:grid-cols-3'>
+														{offer.experienceRequired ? (
+															<div className='rounded-lg border border-cyan-100 bg-white/80 px-2.5 py-2'>
+																<p className='text-[10px] font-black uppercase tracking-[0.08em] text-[#5b7f9d]'>Experience</p>
+																<p className='mt-1 text-xs font-semibold text-[#1d486f]'>{offer.experienceRequired}</p>
+															</div>
+														) : null}
+														{offer.languagesRequired ? (
+															<div className='rounded-lg border border-cyan-100 bg-white/80 px-2.5 py-2'>
+																<p className='text-[10px] font-black uppercase tracking-[0.08em] text-[#5b7f9d]'>Langues</p>
+																<p className='mt-1 text-xs font-semibold text-[#1d486f]'>{offer.languagesRequired}</p>
+															</div>
+														) : null}
+														{offer.technicalSkills ? (
+															<div className='rounded-lg border border-cyan-100 bg-white/80 px-2.5 py-2'>
+																<p className='text-[10px] font-black uppercase tracking-[0.08em] text-[#5b7f9d]'>Competences</p>
+																<p className='mt-1 text-xs font-semibold text-[#1d486f]'>{offer.technicalSkills}</p>
+															</div>
+														) : null}
+													</div>
+
+													<div className='mt-3 space-y-2'>
+														{descriptionSections.map((section, sectionIdx) => (
+															<div key={`${offer._id}-${section.title}-${sectionIdx}`} className='rounded-lg border border-[#dceef9] bg-white px-3 py-2'>
+																<p className='text-[11px] font-black uppercase tracking-[0.1em] text-[#4d7597]'>{section.title}</p>
+																{section.items.length > 1 ? (
+																	<ul className='mt-1.5 list-disc space-y-1 pl-4'>
+																		{section.items.map((item, itemIdx) => (
+																			<li key={`${offer._id}-${section.title}-${sectionIdx}-item-${itemIdx}`} className='text-xs text-[#355978]'>
+																				{item}
+																			</li>
+																		))}
+																	</ul>
+																) : (
+																	<p className='mt-1.5 text-xs text-[#355978]'>{section.items[0]}</p>
+																)}
+															</div>
+														))}
+													</div>
 													<div className='mt-3 flex gap-2'>
 														<button
 															type='button'
 															onClick={() => handleEditOffer(offer)}
-															className='rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50'
+															className='rounded-lg border border-cyan-300 bg-white px-3 py-1 text-xs font-semibold text-[#046595] hover:bg-cyan-50'
 														>
 															Modifier
 														</button>
@@ -1359,13 +1630,14 @@ function DashboardRec() {
 														</button>
 													</div>
 												</div>
-											))}
+											)
+										})}
 										</div>
 									) : null}
 								</div>
 							</div>
 						) : selectedView === 'candidates' ? (
-							<div className='mt-8 rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-5'>
+							<div className='mt-8 rounded-2xl border border-slate-200 bg-[#fbfdff] p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.28),0_10px_26px_rgba(14,165,233,0.14),0_0_20px_rgba(6,182,212,0.2)]'>
 								<div className='flex flex-wrap items-center justify-between gap-3'>
 									<div>
 										<h2 className='text-xl font-black text-[#0d355b]'>Candidats par offre</h2>
@@ -1374,7 +1646,7 @@ function DashboardRec() {
 									<button
 										type='button'
 										onClick={() => recruiter?.id && fetchRecruiterCandidacies(recruiter.id)}
-										className='rounded-xl border border-[#0a7aa2] px-4 py-2 text-sm font-semibold text-[#0a5f88] transition hover:bg-[#ebfaff]'
+										className='rounded-xl border border-cyan-300 bg-white px-4 py-2 text-sm font-semibold text-[#0a5f88] transition hover:bg-cyan-50'
 									>
 										Rafraichir
 									</button>
@@ -1391,7 +1663,8 @@ function DashboardRec() {
 								{!loadingCandidacies && candidaciesByOffer.length > 0 ? (
 									<div className='mt-5 space-y-4'>
 										{candidaciesByOffer.map((group) => (
-											<div key={group.offerId} className='rounded-xl border border-slate-200 bg-white p-4'>
+											<div key={group.offerId} className='overflow-hidden rounded-2xl border border-cyan-100 bg-white p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.2),0_10px_24px_rgba(14,165,233,0.12)]'>
+												<div className='-mx-4 -mt-4 mb-3 h-1 bg-gradient-to-r from-[#06b6d4] via-[#0ea5e9] to-[#1d4ed8]' />
 												<div className='mb-3 flex items-center justify-between gap-2'>
 													<h3 className='text-base font-black text-[#103b62]'>{group.offerTitle}</h3>
 													<span className='rounded-full bg-cyan-100 px-2 py-1 text-[11px] font-semibold text-[#0a6a8f]'>
@@ -1420,13 +1693,13 @@ function DashboardRec() {
 														const fullName = `${cand.firstName || ''} ${cand.lastName || ''}`.trim() || 'Candidat'
 														const appliedAt = candidacy?.createdAt ? new Date(candidacy.createdAt).toLocaleDateString() : 'N/A'
 														return (
-															<div key={candidacy._id} className='rounded-lg border border-slate-200 bg-[#fbfdff] p-3'>
+															<div key={candidacy._id} className='rounded-xl border border-cyan-100 bg-gradient-to-br from-[#f8fdff] via-white to-[#f3fbff] p-3 shadow-[0_0_0_1px_rgba(14,165,233,0.12)]'>
 																<div className='flex flex-wrap items-start justify-between gap-2'>
 																	<p className='text-sm font-bold text-[#103b62]'>{fullName}</p>
 																	<button
 																		type='button'
 																		onClick={() => handlePrefillInterview(group.offerId, candidateId, fullName, cand.email || '')}
-																		className='rounded-md border border-[#0a7aa2] bg-white px-2 py-1 text-xs font-semibold text-[#0a5f88] transition hover:bg-[#ebfaff]'
+																		className='rounded-md border border-cyan-300 bg-white px-2 py-1 text-xs font-semibold text-[#0a5f88] transition hover:bg-cyan-50'
 																	>
 																		Donner rendez-vous
 																	</button>
@@ -1568,24 +1841,28 @@ function DashboardRec() {
 						) : selectedView === 'interviews' ? (
 							<div className='mt-6 space-y-4'>
 								<div className='grid gap-4 sm:grid-cols-3'>
-									<div className='rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#eef8ff] to-[#e2f3ff] p-4'>
+									<div className='overflow-hidden rounded-2xl border border-cyan-100 bg-white p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.18),0_10px_22px_rgba(14,165,233,0.12)]'>
+										<div className='-mx-4 -mt-4 mb-3 h-1 bg-gradient-to-r from-[#06b6d4] to-[#1d4ed8]' />
 										<p className='text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Total</p>
 										<p className='mt-1 text-3xl font-black text-[#0d355b]'>{interviewStats.total}</p>
 									</div>
-									<div className='rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#f2fbf7] to-[#e6f8ef] p-4'>
+									<div className='overflow-hidden rounded-2xl border border-cyan-100 bg-white p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.18),0_10px_22px_rgba(14,165,233,0.12)]'>
+										<div className='-mx-4 -mt-4 mb-3 h-1 bg-gradient-to-r from-[#06b6d4] to-[#1d4ed8]' />
 										<p className='text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Aujourd hui</p>
 										<p className='mt-1 text-3xl font-black text-[#0d355b]'>{interviewStats.today}</p>
 									</div>
-									<div className='rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#fff8ef] to-[#fff2df] p-4'>
+									<div className='overflow-hidden rounded-2xl border border-cyan-100 bg-white p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.18),0_10px_22px_rgba(14,165,233,0.12)]'>
+										<div className='-mx-4 -mt-4 mb-3 h-1 bg-gradient-to-r from-[#06b6d4] to-[#1d4ed8]' />
 										<p className='text-xs font-bold uppercase tracking-wide text-[#4f7191]'>7 jours</p>
 										<p className='mt-1 text-3xl font-black text-[#0d355b]'>{interviewStats.thisWeek}</p>
 									</div>
 								</div>
 
 								<div className='grid gap-5 xl:grid-cols-[1.05fr_1.25fr]'>
-									<div className='rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-5'>
+									<div className='overflow-hidden rounded-2xl border border-cyan-100 bg-[#fbfdff] p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.22),0_10px_24px_rgba(14,165,233,0.12)]'>
+										<div className='-mx-5 -mt-5 mb-4 h-1 bg-gradient-to-r from-[#06b6d4] via-[#0ea5e9] to-[#1d4ed8]' />
 										<h2 className='text-xl font-black text-[#0d355b]'>Planifier un entretien</h2>
-										<p className='mt-1 text-sm text-[#4f7191]'>Créez un rendez-vous clair pour le candidat et l équipe.</p>
+										<p className='mt-1 text-sm text-[#4f7191]'>Créez un rendez-vous.</p>
 
 										{interviewError ? <div className='mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700'>{interviewError}</div> : null}
 										{interviewMessage ? <div className='mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700'>{interviewMessage}</div> : null}
@@ -1686,14 +1963,14 @@ function DashboardRec() {
 											<div className='flex gap-2 pt-1'>
 												<button
 													type='submit'
-													className='rounded-xl bg-gradient-to-r from-[#0a4a72] to-[#0a7aa2] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:brightness-110'
+													className='rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:brightness-110'
 												>
 													Planifier
 												</button>
 												<button
 													type='button'
 													onClick={resetInterviewForm}
-													className='rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+													className='rounded-xl border border-cyan-300 bg-white px-5 py-2.5 text-sm font-semibold text-[#0a5f88] transition hover:bg-cyan-50'
 												>
 													Vider
 												</button>
@@ -1701,7 +1978,8 @@ function DashboardRec() {
 										</form>
 									</div>
 
-									<div className='rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-5'>
+									<div className='overflow-hidden rounded-2xl border border-cyan-100 bg-[#fbfdff] p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.22),0_10px_24px_rgba(14,165,233,0.12)]'>
+										<div className='-mx-5 -mt-5 mb-4 h-1 bg-gradient-to-r from-[#06b6d4] via-[#0ea5e9] to-[#1d4ed8]' />
 										<div className='mb-4 flex items-center justify-between gap-3'>
 											<div>
 												<h2 className='text-xl font-black text-[#0d355b]'>Entretiens planifies</h2>
@@ -1718,41 +1996,85 @@ function DashboardRec() {
 											<p className='rounded-lg border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-[#4f7191]'>Aucun entretien planifie.</p>
 										) : (
 											<div className='space-y-3'>
-												{upcomingInterviews.map((it) => (
-													<div key={it.id} className='rounded-xl border border-slate-200 bg-white p-3'>
-														<div className='flex flex-wrap items-start justify-between gap-3'>
-															<div>
-																<div className='flex flex-wrap items-center gap-2'>
-																	<p className='text-sm font-bold text-[#103b62]'>{it.candidateName}</p>
-																	<span className={`rounded-full border px-2 py-[2px] text-[10px] font-bold ${getInterviewModeBadgeClass(it.mode)}`}>{it.mode}</span>
+												{upcomingInterviews.map((it) => {
+													const scheduledDate = new Date(it.scheduledAt)
+													const isValidDate = !Number.isNaN(scheduledDate.getTime())
+													const dateLabel = isValidDate
+														? scheduledDate.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'long', year: 'numeric' })
+														: 'Date invalide'
+													const timeLabel = isValidDate
+														? scheduledDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+														: '--:--'
+
+													return (
+														<div key={it.id} className='overflow-hidden rounded-xl border border-cyan-100 bg-gradient-to-br from-[#f8fdff] via-white to-[#f3fbff] shadow-[0_0_0_1px_rgba(14,165,233,0.12)]'>
+															<div className='h-1 bg-gradient-to-r from-[#22d3ee] via-[#06b6d4] to-[#0ea5e9]' />
+															<div className='p-4'>
+																<div className='flex flex-wrap items-start justify-between gap-3'>
+																	<div>
+																		<div className='flex flex-wrap items-center gap-2'>
+																			<p className='text-base font-black uppercase text-[#103b62]'>{it.candidateName}</p>
+																			<span className={`rounded-full border px-2.5 py-[3px] text-[10px] font-bold ${getInterviewModeBadgeClass(it.mode)}`}>{it.mode}</span>
+																		</div>
+																		<p className='mt-1 text-xs font-semibold text-[#0a5f88]'>{it.offerTitle}</p>
+																	</div>
+																	<button
+																		type='button'
+																		onClick={() => handleDeleteInterview(it.id)}
+																		className='rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100'
+																	>
+																		Supprimer
+																	</button>
 																</div>
-																<p className='mt-1 text-xs text-[#587a99]'>
-																	{it.offerTitle}
-																</p>
-																<p className='mt-1 text-xs font-semibold text-[#0a5f88]'>
-																	{new Date(it.scheduledAt).toLocaleString()}
-																</p>
-																{it.candidateEmail ? <p className='mt-1 text-xs text-[#587a99]'>{it.candidateEmail}</p> : null}
-																{it.meetingLink ? <p className='mt-1 truncate text-xs text-[#0a5f88]'>Lien: {it.meetingLink}</p> : null}
-																{it.notes ? <p className='mt-2 rounded-lg bg-slate-50 px-2 py-1 text-xs text-[#456786]'>{it.notes}</p> : null}
+
+																<div className='mt-3 grid gap-2 sm:grid-cols-2'>
+																	<div className='rounded-lg border border-[#d8ebf8] bg-white px-3 py-2'>
+																		<p className='text-[10px] font-black uppercase tracking-[0.08em] text-[#5b7f9d]'>Date</p>
+																		<p className='mt-1 text-xs font-semibold text-[#124268]'>{dateLabel}</p>
+																	</div>
+																	<div className='rounded-lg border border-[#d8ebf8] bg-white px-3 py-2'>
+																		<p className='text-[10px] font-black uppercase tracking-[0.08em] text-[#5b7f9d]'>Heure</p>
+																		<p className='mt-1 text-xs font-semibold text-[#124268]'>{timeLabel}</p>
+																	</div>
+																	<div className='rounded-lg border border-[#d8ebf8] bg-white px-3 py-2'>
+																		<p className='text-[10px] font-black uppercase tracking-[0.08em] text-[#5b7f9d]'>Contact</p>
+																		<p className='mt-1 break-all text-xs text-[#355978]'>{it.candidateEmail || 'Email non renseigne'}</p>
+																	</div>
+																	<div className='rounded-lg border border-[#d8ebf8] bg-white px-3 py-2'>
+																		<p className='text-[10px] font-black uppercase tracking-[0.08em] text-[#5b7f9d]'>{it.mode === 'Visio' ? 'Lien visio' : 'Lieu'}</p>
+																		{it.mode === 'Visio' && it.meetingLink ? (
+																			<a
+																				href={it.meetingLink}
+																				target='_blank'
+																				rel='noreferrer'
+																				className='mt-1 inline-flex max-w-full items-center rounded-md bg-cyan-50 px-2 py-1 text-xs font-semibold text-[#0a5f88] hover:bg-cyan-100'
+																			>
+																				Ouvrir le lien
+																			</a>
+																		) : (
+																			<p className='mt-1 text-xs text-[#355978]'>{it.location || 'Non defini'}</p>
+																		)}
+																	</div>
+																</div>
+
+																{it.notes ? (
+																	<div className='mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2'>
+																		<p className='text-[10px] font-black uppercase tracking-[0.08em] text-[#6c879f]'>Notes</p>
+																		<p className='mt-1 text-xs text-[#456786]'>{it.notes}</p>
+																	</div>
+																) : null}
 															</div>
-															<button
-																type='button'
-																onClick={() => handleDeleteInterview(it.id)}
-																className='rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-100'
-															>
-																Supprimer
-															</button>
 														</div>
-													</div>
-												))}
+													)
+												})}
 											</div>
 										)}
 									</div>
 								</div>
 							</div>
 						) : selectedView === 'company' ? (
-							<div className='mt-6 rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-5'>
+							<div className='mt-6 overflow-hidden rounded-2xl border border-cyan-100 bg-[#fbfdff] p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.22),0_10px_24px_rgba(14,165,233,0.12)]'>
+								<div className='-mx-5 -mt-5 mb-4 h-1 bg-gradient-to-r from-[#06b6d4] via-[#0ea5e9] to-[#1d4ed8]' />
 								<div className='mb-5 flex flex-wrap items-center justify-between gap-3'>
 									<div>
 										<h2 className='text-2xl font-black text-[#0d355b]'>Compte entreprise</h2>
@@ -1767,7 +2089,7 @@ function DashboardRec() {
 								{companyMessage ? <div className='mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700'>{companyMessage}</div> : null}
 
 								<form onSubmit={handleSaveCompany} className='grid gap-5 xl:grid-cols-[320px_1fr]'>
-									<div className='rounded-2xl border border-slate-200 bg-white p-4'>
+									<div className='rounded-2xl border border-cyan-100 bg-gradient-to-br from-[#f8fdff] via-white to-[#f3fbff] p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.12)]'>
 										<div className='flex flex-col items-center'>
 											{companyForm.profileImage ? (
 												<img src={companyForm.profileImage} alt='Photo profil' className='h-28 w-28 rounded-full object-cover ring-4 ring-cyan-100' />
@@ -1781,19 +2103,19 @@ function DashboardRec() {
 											</p>
 											<p className='text-center text-xs text-[#587a99]'>{companyForm.company || 'Entreprise'}</p>
 
-											<label className='mt-4 w-full cursor-pointer rounded-lg border border-slate-300 px-3 py-2 text-center text-sm font-semibold text-[#0a5f88] hover:bg-slate-50'>
+											<label className='mt-4 w-full cursor-pointer rounded-lg border border-cyan-300 bg-white px-3 py-2 text-center text-sm font-semibold text-[#0a5f88] hover:bg-cyan-50'>
 												Changer la photo
 												<input type='file' accept='image/*' className='hidden' onChange={handleCompanyImageUpload} />
 											</label>
 
-											<div className='mt-4 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-[#456786]'>
+											<div className='mt-4 w-full rounded-lg border border-cyan-100 bg-[#f8fdff] px-3 py-2 text-xs text-[#456786]'>
 												<p><span className='font-semibold'>Inscrit le:</span> {companyForm.registeredAt ? new Date(companyForm.registeredAt).toLocaleDateString('fr-FR') : 'N/A'}</p>
 												<p className='mt-1'><span className='font-semibold'>Email:</span> {companyForm.email || 'N/A'}</p>
 											</div>
 										</div>
 									</div>
 
-									<div className='rounded-2xl border border-slate-200 bg-white p-4'>
+									<div className='rounded-2xl border border-cyan-100 bg-gradient-to-br from-[#f8fdff] via-white to-[#f3fbff] p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.12)]'>
 										<div className='grid gap-4 sm:grid-cols-2'>
 											<div>
 												<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Prenom</label>
@@ -1833,7 +2155,7 @@ function DashboardRec() {
 										</div>
 
 										<div className='mt-5 flex justify-end'>
-											<button type='submit' className='rounded-xl bg-gradient-to-r from-[#0a4a72] to-[#0a7aa2] px-6 py-2.5 text-sm font-semibold text-white transition-all hover:brightness-110'>
+											<button type='submit' className='rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] px-6 py-2.5 text-sm font-semibold text-white transition-all hover:brightness-110'>
 												Enregistrer les modifications
 											</button>
 										</div>
@@ -1842,7 +2164,8 @@ function DashboardRec() {
 							</div>
 						) : selectedView === 'settings' ? (
 							<div className='mt-6 grid gap-5 xl:grid-cols-2'>
-								<div className='rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-5'>
+								<div className='overflow-hidden rounded-2xl border border-cyan-100 bg-[#fbfdff] p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.22),0_10px_24px_rgba(14,165,233,0.12)]'>
+									<div className='-mx-5 -mt-5 mb-4 h-1 bg-gradient-to-r from-[#06b6d4] via-[#0ea5e9] to-[#1d4ed8]' />
 									<h2 className='text-xl font-black text-[#0d355b]'>Preferences</h2>
 									<p className='mt-1 text-sm text-[#4f7191]'>Langue, fuseau horaire et format de date.</p>
 
@@ -1874,7 +2197,7 @@ function DashboardRec() {
 											</select>
 										</div>
 
-										<div className='space-y-2 rounded-xl border border-slate-200 bg-white p-3'>
+										<div className='space-y-2 rounded-xl border border-cyan-100 bg-[#f8fdff] p-3'>
 											<label className='flex items-center justify-between gap-3 text-sm text-[#365e80]'>
 												<span>Notifier les nouvelles candidatures</span>
 												<input type='checkbox' checked={settingsForm.notifyNewCandidate} onChange={(e) => updateSettingsField('notifyNewCandidate', e.target.checked)} />
@@ -1890,14 +2213,15 @@ function DashboardRec() {
 										</div>
 
 										<div className='pt-1'>
-											<button type='submit' className='rounded-xl bg-gradient-to-r from-[#0a4a72] to-[#0a7aa2] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:brightness-110'>
+											<button type='submit' className='rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:brightness-110'>
 												Enregistrer les preferences
 											</button>
 										</div>
 									</form>
 								</div>
 
-								<div className='rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-5'>
+								<div className='overflow-hidden rounded-2xl border border-cyan-100 bg-[#fbfdff] p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.22),0_10px_24px_rgba(14,165,233,0.12)]'>
+									<div className='-mx-5 -mt-5 mb-4 h-1 bg-gradient-to-r from-[#06b6d4] via-[#0ea5e9] to-[#1d4ed8]' />
 									<h2 className='text-xl font-black text-[#0d355b]'>Securite</h2>
 									<p className='mt-1 text-sm text-[#4f7191]'>Modifier votre mot de passe recruteur.</p>
 
@@ -1928,7 +2252,7 @@ function DashboardRec() {
 										/>
 
 										<div className='pt-1'>
-											<button type='submit' disabled={savingPassword} className='rounded-xl bg-gradient-to-r from-[#0a4a72] to-[#0a7aa2] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60'>
+											<button type='submit' disabled={savingPassword} className='rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60'>
 												{savingPassword ? 'Mise a jour...' : 'Changer le mot de passe'}
 											</button>
 										</div>

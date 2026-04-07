@@ -8,6 +8,12 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const API_ORIGIN = API_BASE.replace(/\/api\/?$/, '')
 
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n))
+const formatQuizSeconds = (totalSeconds) => {
+	const safe = Math.max(0, Number(totalSeconds) || 0)
+	const minutes = Math.floor(safe / 60)
+	const seconds = safe % 60
+	return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
 
 const LineAreaChart = ({ data, height = 140 }) => {
 	const width = 560
@@ -343,6 +349,17 @@ function DashboardCand() {
 	const cvMatchSignatureRef = useRef('')
 	const [isApplying, setIsApplying] = useState(false)
 	const [applyStatus, setApplyStatus] = useState(null)
+	const [quizOpen, setQuizOpen] = useState(false)
+	const [quizLoading, setQuizLoading] = useState(false)
+	const [quizSubmitting, setQuizSubmitting] = useState(false)
+	const [quizError, setQuizError] = useState('')
+	const [quizToken, setQuizToken] = useState('')
+	const [quizQuestions, setQuizQuestions] = useState([])
+	const [quizAnswers, setQuizAnswers] = useState({})
+	const [quizMeta, setQuizMeta] = useState(null)
+	const [quizSecondsLeft, setQuizSecondsLeft] = useState(0)
+	const quizTimedOutRef = useRef(false)
+	const [quizMode, setQuizMode] = useState('standard')
 	const [cvLoading, setCvLoading] = useState(false)
 	const [cvError, setCvError] = useState('')
 	const [cvUrl, setCvUrl] = useState('')
@@ -1365,32 +1382,92 @@ function DashboardCand() {
 		})
 	}
 
-	const handleApply = async () => {
+	const quizModeConfig = {
+		standard: { count: 8, label: '8 questions / 8 min', durationMinutes: 8 },
+		rapide: { count: 5, label: '5 questions / 8 min', durationMinutes: 8 },
+	}
+
+	const loadQuizSession = async (mode = quizMode) => {
 		if (!candidate || !selectedJob) return
 		setApplyStatus(null)
+		setQuizError('')
+
 		if (appliedOfferIds.has(selectedJob.id)) {
 			setApplyStatus({ type: 'info', message: 'Vous avez déjà postulé à cette offre.' })
 			return
 		}
+
+		const modeConfig = quizModeConfig[mode] || quizModeConfig.standard
+		setQuizMode(mode)
+
 		try {
-			const candidateId = candidate?.id || candidate?._id
-			if (!candidateId) return
-			setIsApplying(true)
+			setQuizLoading(true)
+			const response = await fetch(`${API_BASE}/quizzes/session?jobOfferId=${selectedJob.id}&count=${modeConfig.count}&level=junior`)
+			const data = await response.json().catch(() => ({}))
+
+			if (!response.ok || !data?.success) {
+				setQuizError(data?.message || 'Impossible de générer le quiz automatiquement pour cette offre.')
+				return
+			}
+
+			const list = Array.isArray(data?.questions) ? data.questions : []
+			if (list.length === 0) {
+				setQuizError('Aucune question quiz disponible pour cette offre.')
+				return
+			}
+
+			setQuizToken(String(data?.quizToken || ''))
+			setQuizQuestions(list)
+			setQuizAnswers({})
+			setQuizMeta({ ...(data?.meta || {}), durationMinutes: modeConfig.durationMinutes })
+			setQuizSecondsLeft(Number(data?.meta?.expiresInSeconds) || modeConfig.durationMinutes * 60)
+			quizTimedOutRef.current = false
+			setQuizOpen(true)
+		} catch (error) {
+			console.error('Error loading quiz:', error)
+			setQuizError('Erreur serveur pendant la génération du quiz.')
+		} finally {
+			setQuizLoading(false)
+		}
+	}
+
+	const createCandidacy = async ({ quizAttemptId = '', scorePercent = null } = {}) => {
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId || !selectedJob?.id) return
+
+		setIsApplying(true)
+		try {
 			const res = await fetch(`${API_BASE}/candidacies`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ candidateId, jobOfferId: selectedJob.id, cvId: activeCvId || undefined }),
+				body: JSON.stringify({
+					candidateId,
+					jobOfferId: selectedJob.id,
+					cvId: activeCvId || undefined,
+					quizAttemptId: quizAttemptId || undefined,
+				}),
 			})
-			const data = await res.json()
-			if (data.success) {
-				setApplyStatus({ type: 'success', message: 'Candidature envoyée avec succès.' })
-				// Refresh candidacies
-				const candidaciesRes = await fetch(`${API_BASE}/candidacies/${candidateId}`)
-				const candidaciesData = await candidaciesRes.json()
-				if (candidaciesData.success) setCandidacies(candidaciesData.candidacies)
-			} else {
-				setApplyStatus({ type: 'error', message: data.message || 'Erreur lors de la candidature.' })
+
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) {
+				setApplyStatus({ type: 'error', message: data?.message || 'Erreur lors de la candidature.' })
+				return
 			}
+
+			const scoreLabel = Number.isFinite(scorePercent) ? ` Score quiz: ${scorePercent}%.` : ''
+			setApplyStatus({ type: 'success', message: `Candidature envoyée avec succès.${scoreLabel}` })
+			setQuizOpen(false)
+			setQuizError('')
+			setQuizToken('')
+			setQuizQuestions([])
+			setQuizAnswers({})
+			setQuizMeta(null)
+			setQuizSecondsLeft(0)
+			quizTimedOutRef.current = false
+
+			const candidaciesRes = await fetch(`${API_BASE}/candidacies/${candidateId}`)
+			const candidaciesData = await candidaciesRes.json().catch(() => ({}))
+			if (candidaciesData?.success) setCandidacies(candidaciesData.candidacies || [])
 		} catch (error) {
 			console.error('Error applying:', error)
 			setApplyStatus({ type: 'error', message: 'Erreur serveur. Réessayez plus tard.' })
@@ -1398,6 +1475,90 @@ function DashboardCand() {
 			setIsApplying(false)
 		}
 	}
+
+	const handleApply = async () => {
+		await loadQuizSession(quizMode)
+	}
+
+	const handleQuizAnswerChange = (questionId, optionKey) => {
+		setQuizAnswers((prev) => ({ ...prev, [questionId]: optionKey }))
+	}
+
+	const handleSubmitQuizAndApply = async ({ forceSubmit = false } = {}) => {
+		if (!candidate || !selectedJob || quizSubmitting) return
+		if (!quizToken) {
+			setQuizError('Session quiz invalide. Rechargez le quiz.')
+			return
+		}
+
+		const questionIds = quizQuestions.map((q) => String(q.id || ''))
+		if (!forceSubmit && questionIds.some((id) => !quizAnswers[id])) {
+			setQuizError('Merci de répondre à toutes les questions avant de continuer.')
+			return
+		}
+
+		setQuizError('')
+		setQuizSubmitting(true)
+		try {
+			const candidateId = candidate?.id || candidate?._id
+			const answers = questionIds.map((questionId) => ({
+				questionId,
+				selectedOptionKey: quizAnswers[questionId] || '',
+			}))
+
+			const response = await fetch(`${API_BASE}/quizzes/submit`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					candidateId,
+					jobOfferId: selectedJob.id,
+					quizToken,
+					answers,
+				}),
+			})
+
+			const data = await response.json().catch(() => ({}))
+			if (!response.ok || !data?.success) {
+				setQuizError(data?.message || 'Impossible de corriger le quiz.')
+				return
+			}
+
+			await createCandidacy({
+				quizAttemptId: data?.attemptId || '',
+				scorePercent: Number.isFinite(data?.scorePercent) ? data.scorePercent : null,
+			})
+		} catch (error) {
+			console.error('Error submitting quiz:', error)
+			setQuizError('Erreur serveur pendant la soumission du quiz.')
+		} finally {
+			setQuizSubmitting(false)
+		}
+	}
+
+	useEffect(() => {
+		if (!quizOpen) return
+		if (!Number.isFinite(quizSecondsLeft) || quizSecondsLeft <= 0) return
+
+		const interval = setInterval(() => {
+			setQuizSecondsLeft((prev) => {
+				if (!Number.isFinite(prev) || prev <= 1) return 0
+				return prev - 1
+			})
+		}, 1000)
+
+		return () => clearInterval(interval)
+	}, [quizOpen, quizSecondsLeft])
+
+	useEffect(() => {
+		if (!quizOpen) return
+		if (quizSecondsLeft > 0) return
+		if (quizSubmitting || isApplying) return
+		if (quizTimedOutRef.current) return
+
+		quizTimedOutRef.current = true
+		setQuizError('Temps ecoule. Le quiz est soumis automatiquement.')
+		handleSubmitQuizAndApply({ forceSubmit: true })
+	}, [quizOpen, quizSecondsLeft, quizSubmitting, isApplying])
 
 	if (loading) {
 		return (
@@ -1749,12 +1910,12 @@ function DashboardCand() {
 															<button
 																type='button'
 																onClick={handleApply}
-																disabled={isApplying || selectedJobAlreadyApplied}
+																disabled={isApplying || quizLoading || selectedJobAlreadyApplied}
 																className={`mt-4 w-full rounded-2xl py-3 text-sm font-bold text-white transition ${
-																	isApplying || selectedJobAlreadyApplied ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'
+																	isApplying || quizLoading || selectedJobAlreadyApplied ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'
 																}`}
 															>
-																{isApplying ? 'Envoi en cours…' : selectedJobAlreadyApplied ? 'Déjà postulé' : 'Postuler'}
+																{quizLoading ? 'Generation quiz...' : isApplying ? 'Envoi en cours...' : selectedJobAlreadyApplied ? 'Deja postule' : 'Passer le quiz et postuler'}
 															</button>
 												</div>
 
@@ -2733,6 +2894,7 @@ function DashboardCand() {
 														Postulé le: {createdAt ? createdAt.toLocaleDateString() : '—'}
 													</p>
 													<p className='text-sm text-slate-600'>Statut: {c.status || 'En attente'}</p>
+															{Number.isFinite(c?.quizScore) ? <p className='text-sm text-slate-600'>Score quiz: {c.quizScore}%</p> : null}
 											</div>
 											)
 										})}
@@ -2743,6 +2905,93 @@ function DashboardCand() {
 					</div>
 				</main>
 			</div>
+
+			{quizOpen ? (
+				<div className='fixed inset-0 z-50 flex items-center justify-center bg-[#00162f]/55 p-4'>
+					<div
+						className='max-h-[88vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_24px_60px_rgba(0,22,47,0.35)] select-none'
+						onCopy={(e) => e.preventDefault()}
+						onCut={(e) => e.preventDefault()}
+						onPaste={(e) => e.preventDefault()}
+						onContextMenu={(e) => e.preventDefault()}
+					>
+						<div className='border-b border-slate-200 bg-gradient-to-r from-[#f0f9ff] via-white to-[#eef6ff] px-5 py-4'>
+							<div className='flex flex-wrap items-start justify-between gap-3'>
+								<div>
+									<p className='text-[11px] font-black uppercase tracking-[0.12em] text-[#5b7f9d]'>Quiz automatique</p>
+									<h3 className='mt-1 text-lg font-black text-[#0d355b]'>{selectedJob?.title || 'Offre'}</h3>
+									<p className='mt-1 text-xs text-[#4f7191]'>Questions generees automatiquement selon le domaine du poste.</p>
+									{quizMeta?.domain ? <p className='mt-1 text-xs text-[#4f7191]'>Domaine detecte: {quizMeta.domain}</p> : null}
+									<p className='mt-1 text-xs font-semibold text-[#0a5f88]'>Mode: {quizModeConfig[quizMode]?.label || '8 questions / 8 min'}</p>
+								</div>
+								<div className='flex items-center gap-2'>
+									<div className={`rounded-full border px-3 py-1 text-xs font-bold ${quizSecondsLeft <= 30 ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-cyan-200 bg-cyan-50 text-cyan-700'}`}>
+										Chrono: {formatQuizSeconds(quizSecondsLeft)}
+									</div>
+									<div className='rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700'>
+										{quizQuestions.length} questions
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<div className='max-h-[60vh] overflow-y-auto px-5 py-4'>
+							<div className='space-y-4'>
+								{quizQuestions.map((q, index) => (
+									<div key={q.id} className='rounded-xl border border-cyan-100 bg-gradient-to-br from-[#f8fdff] via-white to-[#f4fbff] p-4'>
+										<p className='text-sm font-black text-[#103b62]'>
+											Q{index + 1}. {q.question}
+										</p>
+										<div className='mt-3 grid gap-2'>
+											{(q.options || []).map((opt) => {
+												const checked = quizAnswers[q.id] === opt.key
+												return (
+													<label key={`${q.id}-${opt.key}`} className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm ${checked ? 'border-cyan-300 bg-cyan-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+														<input
+															type='radio'
+															name={`quiz-${q.id}`}
+															checked={checked}
+															onChange={() => handleQuizAnswerChange(q.id, opt.key)}
+															className='mt-1 h-4 w-4'
+														/>
+														<span className='text-slate-700'>{opt.text}</span>
+													</label>
+												)
+											})}
+										</div>
+									</div>
+								))}
+							</div>
+
+							{quizError ? <div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-800'>{quizError}</div> : null}
+						</div>
+
+						<div className='flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-4'>
+							<button
+								type='button'
+								onClick={() => {
+									if (quizSubmitting || isApplying) return
+									setQuizOpen(false)
+									setQuizError('')
+									setQuizSecondsLeft(0)
+									quizTimedOutRef.current = false
+								}}
+								className='rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+							>
+								Annuler
+							</button>
+							<button
+								type='button'
+								onClick={() => handleSubmitQuizAndApply()}
+								disabled={quizSubmitting || isApplying || quizSecondsLeft <= 0}
+								className={`rounded-xl px-4 py-2 text-sm font-semibold text-white ${quizSubmitting || isApplying || quizSecondsLeft <= 0 ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
+							>
+								{quizSubmitting ? 'Correction en cours...' : isApplying ? 'Candidature en cours...' : 'Valider le quiz et postuler'}
+							</button>
+						</div>
+					</div>
+				</div>
+			) : null}
 		</section>
 	)
 }

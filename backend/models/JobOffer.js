@@ -34,6 +34,21 @@ const jobOfferSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    experienceRequired: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    languagesRequired: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    technicalSkills: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     description: {
       type: String,
       required: true,
