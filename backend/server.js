@@ -898,6 +898,7 @@ app.post('/api/candidates/register', async (req, res) => {
       sector,
       experienceLevel,
       portfolioUrl,
+      profileImage,
       password,
     } = req.body;
 
@@ -942,6 +943,13 @@ app.post('/api/candidates/register', async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
+    const imageValue = typeof profileImage === 'string' ? profileImage.trim() : '';
+    if (imageValue && imageValue.length > 2000000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Image de profil trop volumineuse.',
+      });
+    }
 
     const candidate = await Candidate.create({
       firstName,
@@ -953,6 +961,7 @@ app.post('/api/candidates/register', async (req, res) => {
       sector,
       experienceLevel,
       portfolioUrl: portfolioUrl || '',
+      profileImage: imageValue,
       passwordHash,
     });
 
@@ -970,6 +979,7 @@ app.post('/api/candidates/register', async (req, res) => {
         sector: candidate.sector,
         experienceLevel: candidate.experienceLevel,
         portfolioUrl: candidate.portfolioUrl,
+        profileImage: candidate.profileImage || '',
       },
     });
   } catch (error) {
@@ -1032,6 +1042,7 @@ app.post('/api/candidates/login', async (req, res) => {
         sector: candidate.sector,
         experienceLevel: candidate.experienceLevel,
         portfolioUrl: candidate.portfolioUrl,
+        profileImage: candidate.profileImage || '',
       },
     });
   } catch (error) {
@@ -1455,6 +1466,7 @@ app.put('/api/candidates/:candidateId', async (req, res) => {
       sector,
       experienceLevel,
       portfolioUrl,
+      profileImage,
     } = req.body || {};
 
     const next = {
@@ -1466,6 +1478,7 @@ app.put('/api/candidates/:candidateId', async (req, res) => {
       sector: sector !== undefined ? String(sector).trim() : candidate.sector,
       experienceLevel: experienceLevel !== undefined ? String(experienceLevel).trim() : candidate.experienceLevel,
       portfolioUrl: portfolioUrl !== undefined ? String(portfolioUrl).trim() : candidate.portfolioUrl,
+      profileImage: profileImage !== undefined ? String(profileImage).trim() : candidate.profileImage || '',
     };
 
     if (!next.firstName || !next.lastName || !next.email || !next.country || !next.professionalTitle || !next.sector || !next.experienceLevel) {
@@ -1479,6 +1492,13 @@ app.put('/api/candidates/:candidateId', async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "experienceLevel invalide (student, junior, confirmed, senior).",
+      });
+    }
+
+    if (next.profileImage && next.profileImage.length > 2000000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Image de profil trop volumineuse.',
       });
     }
 
@@ -1505,6 +1525,7 @@ app.put('/api/candidates/:candidateId', async (req, res) => {
     candidate.sector = next.sector;
     candidate.experienceLevel = next.experienceLevel;
     candidate.portfolioUrl = next.portfolioUrl;
+    candidate.profileImage = next.profileImage;
 
     await candidate.save();
 
@@ -1522,6 +1543,7 @@ app.put('/api/candidates/:candidateId', async (req, res) => {
         sector: candidate.sector,
         experienceLevel: candidate.experienceLevel,
         portfolioUrl: candidate.portfolioUrl,
+        profileImage: candidate.profileImage || '',
       },
     });
   } catch (error) {
