@@ -21,6 +21,20 @@ const candidacySchema = new mongoose.Schema(
       index: true,
       default: null,
     },
+    quizAttemptId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'QuizAttempt',
+      required: false,
+      index: true,
+      default: null,
+    },
+    quizScore: {
+      type: Number,
+      required: false,
+      min: 0,
+      max: 100,
+      default: null,
+    },
     status: {
       type: String,
       enum: ['applied', 'reviewed', 'accepted', 'rejected'],
