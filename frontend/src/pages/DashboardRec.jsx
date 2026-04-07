@@ -1348,6 +1348,7 @@ function DashboardRec() {
 
 	const handleLogout = () => {
 		localStorage.removeItem('airRecruiter')
+		window.dispatchEvent(new Event('localStorageChange'))
 		navigate('/connexion')
 	}
 
