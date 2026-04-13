@@ -3,323 +3,24 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { assets } from '../assets/assets'
 import { saveCvDraft } from '../utils/cvDraft'
+import { parseSalaryRange, extractMaxExperienceYears, normalizeSuggestionsPayload } from './dashboardCand/helpers'
+import { useCandidateNotifications } from './dashboardCand/useCandidateNotifications'
+import { useCandidateSettings } from './dashboardCand/useCandidateSettings'
+import {
+	DashboardCandOffresView,
+	DashboardCandCvView,
+	DashboardCandSuggestionsView,
+	DashboardCandNotificationsView,
+	DashboardCandSettingsView,
+	DashboardCandAnalyticsView,
+	DashboardCandOfferHelpView,
+	DashboardCandAssistantView,
+	DashboardCandCandidaturesView,
+	DashboardCandQuizModal,
+} from './dashboardCand/index'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const API_ORIGIN = API_BASE.replace(/\/api\/?$/, '')
-const COUNTRY_EMOJI_FONT = '"Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", "Jost", sans-serif'
-
-const clamp = (n, min, max) => Math.min(max, Math.max(min, n))
-const formatQuizSeconds = (totalSeconds) => {
-	const safe = Math.max(0, Number(totalSeconds) || 0)
-	const minutes = Math.floor(safe / 60)
-	const seconds = safe % 60
-	return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-}
-
-const LineAreaChart = ({ data, height = 140 }) => {
-	const width = 560
-	const padding = { top: 12, right: 12, bottom: 24, left: 36 }
-	const points = Array.isArray(data) ? data : []
-	const values = points.map((p) => (Number.isFinite(p?.value) ? p.value : 0))
-	const maxVal = Math.max(1, ...values)
-	const minVal = 0
-
-	const innerW = width - padding.left - padding.right
-	const innerH = height - padding.top - padding.bottom
-	const stepX = points.length > 1 ? innerW / (points.length - 1) : innerW
-
-	const xy = points.map((p, idx) => {
-		const v = Number.isFinite(p?.value) ? p.value : 0
-		const x = padding.left + idx * stepX
-		const y = padding.top + (1 - (v - minVal) / (maxVal - minVal)) * innerH
-		return { x, y, v, label: p?.label || '' }
-	})
-
-	const lineD = xy.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')
-	const areaD = `${lineD} L ${(padding.left + (points.length - 1) * stepX).toFixed(2)} ${(padding.top + innerH).toFixed(2)} L ${padding.left.toFixed(2)} ${(padding.top + innerH).toFixed(2)} Z`
-
-	const ticks = 4
-	const yTicks = Array.from({ length: ticks + 1 }, (_, i) => {
-		const t = i / ticks
-		const v = (1 - t) * maxVal
-		const y = padding.top + t * innerH
-		return { v: Math.round(v * 10) / 10, y }
-	})
-
-	return (
-		<div className='w-full overflow-x-auto'>
-			<svg viewBox={`0 0 ${width} ${height}`} className='w-full min-w-[520px]'>
-				<defs>
-					<linearGradient id='airLineFill' x1='0' y1='0' x2='0' y2='1'>
-						<stop offset='0%' stopColor='#06d5e0' stopOpacity='0.25' />
-						<stop offset='100%' stopColor='#06d5e0' stopOpacity='0.02' />
-					</linearGradient>
-				</defs>
-
-				{yTicks.map((t) => (
-					<g key={`y-${t.y}`}>
-						<line x1={padding.left} y1={t.y} x2={width - padding.right} y2={t.y} stroke='#e2e8f0' strokeWidth='1' />
-						<text x={padding.left - 8} y={t.y + 4} textAnchor='end' fontSize='10' fill='#64748b'>
-							{t.v}
-						</text>
-					</g>
-				))}
-
-				<path d={areaD} fill='url(#airLineFill)' />
-				<path d={lineD} fill='none' stroke='#06d5e0' strokeWidth='2.5' />
-				{xy.map((p) => (
-					<circle key={`pt-${p.x}`} cx={p.x} cy={p.y} r='2.8' fill='#001d3e' stroke='#06d5e0' strokeWidth='1.5' />
-				))}
-
-				{xy.length > 0 ? (
-					<>
-						<text x={padding.left} y={height - 8} fontSize='10' fill='#64748b'>
-							{xy[0].label}
-						</text>
-						<text x={width - padding.right} y={height - 8} textAnchor='end' fontSize='10' fill='#64748b'>
-							{xy[xy.length - 1].label}
-						</text>
-					</>
-				) : null}
-			</svg>
-		</div>
-	)
-}
-
-const DonutChart = ({ segments, size = 160 }) => {
-	const s = Array.isArray(segments) ? segments : []
-	const total = Math.max(1, s.reduce((acc, seg) => acc + (Number.isFinite(seg?.value) ? seg.value : 0), 0))
-	const cx = size / 2
-	const cy = size / 2
-	const r = size * 0.36
-	const stroke = size * 0.12
-	const C = 2 * Math.PI * r
-	let offset = 0
-
-	return (
-		<svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-			<circle cx={cx} cy={cy} r={r} fill='none' stroke='#e2e8f0' strokeWidth={stroke} />
-			{s.map((seg) => {
-				const val = Number.isFinite(seg?.value) ? seg.value : 0
-				const frac = clamp(val / total, 0, 1)
-				const len = frac * C
-				const dash = `${len} ${C - len}`
-				const dashOffset = -offset
-				offset += len
-				return (
-					<circle
-						key={`seg-${seg?.label || seg?.color || 'seg'}`}
-						cx={cx}
-						cy={cy}
-						r={r}
-						fill='none'
-						stroke={seg.color}
-						strokeWidth={stroke}
-						strokeLinecap='round'
-						strokeDasharray={dash}
-						strokeDashoffset={dashOffset}
-						transform={`rotate(-90 ${cx} ${cy})`}
-					/>
-				)
-			})}
-		</svg>
-	)
-}
-
-const BarChart = ({ values, labels, height = 160 }) => {
-	const list = Array.isArray(values) ? values : []
-	const max = Math.max(1, ...list.map((v) => (Number.isFinite(v) ? v : 0)))
-
-	return (
-		<div className='w-full overflow-x-auto'>
-			<div className='flex min-w-[680px] items-end gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2 py-3' style={{ height }}>
-				{list.map((v, i) => {
-					const safe = Number.isFinite(v) ? v : 0
-					const h = Math.max(4, Math.round((safe / max) * (height - 46)))
-					return (
-						<div key={`${labels?.[i] || i}`} className='flex w-6 flex-col items-center justify-end gap-1'>
-							<div className='w-full rounded-t bg-gradient-to-t from-[#0a5f88] to-[#06d5e0]' style={{ height: `${h}px` }} title={`${labels?.[i] || i}: ${safe}`} />
-							<span className='text-[10px] font-semibold text-slate-500'>{(labels?.[i] || '').slice(0, 2)}</span>
-						</div>
-					)
-				})}
-			</div>
-		</div>
-	)
-}
-
-const Badge = ({ children, variant = 'slate' }) => {
-	const styles = {
-		slate: 'border-slate-200 bg-slate-50 text-slate-700',
-		cyan: 'border-cyan-200 bg-cyan-50 text-cyan-800',
-		blue: 'border-blue-200 bg-blue-50 text-blue-800',
-		emerald: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-		amber: 'border-amber-200 bg-amber-50 text-amber-900',
-		violet: 'border-violet-200 bg-violet-50 text-violet-800',
-	}
-	return (
-		<span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${styles[variant] || styles.slate}`}>
-			{children}
-		</span>
-	)
-}
-
-const Tag = ({ children }) => (
-	<span className='inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700'>
-		{children}
-	</span>
-)
-
-const parseSalaryRange = (value) => {
-	const text = String(value || '').trim()
-	if (!text) return null
-	const matches = [...text.matchAll(/(\d+(?:[\.,]\d+)?)(\s*[kK])?/g)]
-	if (!matches.length) return null
-	const numbers = matches
-		.map((m) => {
-			const raw = String(m[1] || '').replace(',', '.')
-			let n = Number.parseFloat(raw)
-			if (!Number.isFinite(n)) return null
-			if (m[2]) n *= 1000
-			return Math.round(n)
-		})
-		.filter((n) => Number.isFinite(n))
-	if (!numbers.length) return null
-	if (numbers.length === 1) return { min: numbers[0], max: numbers[0] }
-	const min = Math.min(numbers[0], numbers[1])
-	const max = Math.max(numbers[0], numbers[1])
-	return { min, max }
-}
-
-const extractMaxExperienceYears = (text) => {
-	const s = String(text || '')
-	const matches = [...s.matchAll(/(\d{1,2})\s*\+?\s*(?:ans|ann[eé]e?s?|years?)/gi)]
-	if (!matches.length) return null
-	let max = null
-	for (const m of matches) {
-		const n = Number.parseInt(m[1], 10)
-		if (!Number.isFinite(n)) continue
-		if (max === null || n > max) max = n
-	}
-	return max
-}
-
-const toStringList = (value) => {
-	if (!value) return []
-	if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean)
-	if (typeof value === 'string') {
-		return value
-			.split(/\r?\n/)
-			.map((line) => line.replace(/^\s*[-•]\s*/, '').trim())
-			.filter(Boolean)
-	}
-	return [String(value).trim()].filter(Boolean)
-}
-
-const categoryFromText = (text) => {
-	const t = (text || '').toLowerCase()
-	if (/(formation|éducation|education|dipl[oô]me|universit|certif|ecole|école)/.test(t)) return 'Formation'
-	if (/(skill|comp[ée]tence|competence|stack|technolog|framework|outil|language|langage|technique|backend|frontend|devops|cloud|sql|react|node|java|python)/.test(t)) {
-		if (/(soft|communication|leadership|team|équipe|gestion|organisation|autonomie|rigueur|relation)/.test(t)) return 'Compétences (soft skills)'
-		return 'Compétences techniques (skills)'
-	}
-	if (/(exp[ée]rience|experience|emploi|poste|stage|mission|responsabilit)/.test(t)) return 'Expérience'
-	if (/(projet|portfolio|github|gitlab|lien|site|demo|d[ée]mo)/.test(t)) return 'Projets & Portfolio'
-	if (/(ats|mot[- ]?cl[ée]s|keywords|structure|format|mise en page|rubrique|section|resume|résumé)/.test(t)) return 'Structure & ATS'
-	if (/(langue|anglais|fran[çc]ais|arab|niveau linguist)/.test(t)) return 'Langues'
-	return 'Autres'
-}
-
-const SETTINGS_COUNTRY_OTHER = '__OTHER__'
-const SETTINGS_COUNTRIES = [
-	{ value: 'Tunisie', label: '🇹🇳 Tunisie' },
-	{ value: 'France', label: '🇫🇷 France' },
-	{ value: 'Algérie', label: '🇩🇿 Algérie' },
-	{ value: 'Maroc', label: '🇲🇦 Maroc' },
-	{ value: 'Égypte', label: '🇪🇬 Égypte' },
-	{ value: 'Belgique', label: '🇧🇪 Belgique' },
-	{ value: 'Suisse', label: '🇨🇭 Suisse' },
-	{ value: 'Canada', label: '🇨🇦 Canada' },
-	{ value: 'Allemagne', label: '🇩🇪 Allemagne' },
-	{ value: 'Italie', label: '🇮🇹 Italie' },
-	{ value: 'Espagne', label: '🇪🇸 Espagne' },
-	{ value: 'Portugal', label: '🇵🇹 Portugal' },
-	{ value: 'Royaume-Uni', label: '🇬🇧 Royaume-Uni' },
-	{ value: 'Pays-Bas', label: '🇳🇱 Pays-Bas' },
-	{ value: 'Suède', label: '🇸🇪 Suède' },
-	{ value: 'États-Unis', label: '🇺🇸 États-Unis' },
-	{ value: 'Émirats arabes unis', label: '🇦🇪 Émirats arabes unis' },
-	{ value: 'Arabie saoudite', label: '🇸🇦 Arabie saoudite' },
-	{ value: 'Qatar', label: '🇶🇦 Qatar' },
-	{ value: 'Turquie', label: '🇹🇷 Turquie' },
-]
-
-const normalizeSuggestionsPayload = (payload) => {
-	if (!payload) {
-		return {
-			summary: '',
-			strengths: [],
-			detectedRole: '',
-			detectedLanguage: '',
-			recommendationsByCategory: {},
-		}
-	}
-
-	const raw = typeof payload === 'string' ? { summary: payload } : payload
-	let summary = raw?.summary || raw?.synthese || raw?.synthesis || raw?.resume || ''
-	const detectedRole = raw?.detectedRole || raw?.role || raw?.jobTitle || ''
-	const detectedLanguage = raw?.detectedLanguage || raw?.language || ''
-
-	let strengths = toStringList(raw?.strengths || raw?.pointsForts || raw?.highlights || raw?.strongPoints)
-
-	if (strengths.length === 0 && typeof summary === 'string' && /points\s+forts?/i.test(summary)) {
-		const match = summary.match(
-			/points\s+forts?\s*[:\-]\s*([\s\S]*?)(?=\n\s*(?:axes\s+d['’]am[ée]lioration|recommandations?|am[ée]liorations?)\b|$)/i
-		)
-		if (match?.[1]) {
-			strengths = toStringList(match[1])
-			summary = summary.replace(match[0], '').trim()
-		}
-	}
-
-	const recommendationsByCategory = {}
-	const categorized = raw?.recommendationsByCategory || raw?.recommendations || raw?.improvements || null
-	if (categorized && typeof categorized === 'object' && !Array.isArray(categorized)) {
-		for (const [categoryKey, items] of Object.entries(categorized)) {
-			const list = Array.isArray(items) ? items : [items]
-			recommendationsByCategory[categoryKey] = list
-				.map((item) => (typeof item === 'string' ? { title: item } : item))
-				.filter(Boolean)
-		}
-	} else {
-		const flat = Array.isArray(raw?.suggestions) ? raw.suggestions : []
-		for (const item of flat) {
-			const normalizedItem = typeof item === 'string' ? { title: item } : item
-			if (!normalizedItem) continue
-			const text = `${normalizedItem.title || ''} ${normalizedItem.why || ''} ${normalizedItem.example || ''}`
-			const category = normalizedItem.category || categoryFromText(text)
-			if (!recommendationsByCategory[category]) recommendationsByCategory[category] = []
-			recommendationsByCategory[category].push(normalizedItem)
-		}
-	}
-
-	const orderedKeys = ['Formation', 'Compétences techniques (skills)', 'Compétences (soft skills)', 'Expérience', 'Projets & Portfolio', 'Structure & ATS', 'Langues', 'Autres']
-	const ordered = {}
-	for (const key of orderedKeys) {
-		if (recommendationsByCategory[key]?.length) ordered[key] = recommendationsByCategory[key]
-	}
-	for (const [key, value] of Object.entries(recommendationsByCategory)) {
-		if (!ordered[key] && Array.isArray(value) && value.length) ordered[key] = value
-	}
-
-	return {
-		summary,
-		strengths,
-		detectedRole,
-		detectedLanguage,
-		recommendationsByCategory: ordered,
-	}
-}
 
 function DashboardCand() {
 	const navigate = useNavigate()
@@ -358,11 +59,6 @@ function DashboardCand() {
 	const [salaryMin, setSalaryMin] = useState('')
 	const [salaryMax, setSalaryMax] = useState('')
 	const [experienceMinYears, setExperienceMinYears] = useState('')
-	const [sortBy, setSortBy] = useState('match')
-	const [contractFilter, setContractFilter] = useState('all')
-	const [workModeFilter, setWorkModeFilter] = useState('all')
-	const [matchFilter, setMatchFilter] = useState('all')
-	const [showSavedOnly, setShowSavedOnly] = useState(false)
 	const [currentTime, setCurrentTime] = useState(new Date())
 	const [jobs, setJobs] = useState([])
 	const [candidacies, setCandidacies] = useState([])
@@ -419,56 +115,54 @@ function DashboardCand() {
 	const [offerHelpError, setOfferHelpError] = useState('')
 	const [assistantHydrated, setAssistantHydrated] = useState(false)
 	const [offerHelpHydrated, setOfferHelpHydrated] = useState(false)
-	const [notifications, setNotifications] = useState([])
-	const [notificationsUnreadCount, setNotificationsUnreadCount] = useState(0)
-	const [notificationsLoading, setNotificationsLoading] = useState(false)
-	const [notificationsError, setNotificationsError] = useState('')
-	const [settingsForm, setSettingsForm] = useState({
-		firstName: '',
-		lastName: '',
-		email: '',
-		country: '',
-		birthDate: '',
-		professionalTitle: '',
-		sector: '',
-		experienceLevel: 'junior',
-		portfolioUrl: '',
-		profileImage: '',
-	})
-	const [settingsSaving, setSettingsSaving] = useState(false)
-	const [settingsMessage, setSettingsMessage] = useState('')
-	const [settingsError, setSettingsError] = useState('')
-	const [settingsPhotoError, setSettingsPhotoError] = useState('')
-	const [settingsCvFile, setSettingsCvFile] = useState(null)
-	const [settingsCvUploading, setSettingsCvUploading] = useState(false)
-	const [settingsCvMessage, setSettingsCvMessage] = useState('')
-	const [settingsCvError, setSettingsCvError] = useState('')
-	const [passwordForm, setPasswordForm] = useState({
-		currentPassword: '',
-		newPassword: '',
-		confirmPassword: '',
-		verificationCode: '',
-	})
-	const [passwordSaving, setPasswordSaving] = useState(false)
-	const [passwordMessage, setPasswordMessage] = useState('')
-	const [passwordError, setPasswordError] = useState('')
-	const [passwordCodeSending, setPasswordCodeSending] = useState(false)
-	const [appFeedbackForm, setAppFeedbackForm] = useState({ rating: 0, comment: '' })
-	const [appFeedbackSaving, setAppFeedbackSaving] = useState(false)
-	const [appFeedbackMessage, setAppFeedbackMessage] = useState('')
-	const [appFeedbackError, setAppFeedbackError] = useState('')
-	const [appFeedbackSummary, setAppFeedbackSummary] = useState({ averageRating: null, totalFeedbacks: 0 })
-	const [appFeedbackOpen, setAppFeedbackOpen] = useState(false)
 
 	const normalizedSuggestions = useMemo(() => normalizeSuggestionsPayload(suggestionsData), [suggestionsData])
 	const activeCvMeta = useMemo(() => cvHistory.find((x) => x?.isActive) || null, [cvHistory])
 	const selectedCvMeta = useMemo(() => cvHistory.find((x) => String(x?._id) === String(selectedCvId)) || null, [cvHistory, selectedCvId])
-	const isCustomCountry = useMemo(() => {
-		const value = String(settingsForm.country || '').trim()
-		if (!value) return false
-		return !SETTINGS_COUNTRIES.some((item) => item.value === value)
-	}, [settingsForm.country])
-	const selectedCountryValue = isCustomCountry ? SETTINGS_COUNTRY_OTHER : String(settingsForm.country || '')
+	const candidateId = candidate?.id || candidate?._id
+	const {
+		notifications,
+		notificationsUnreadCount,
+		notificationsLoading,
+		notificationsError,
+		fetchNotifications,
+		markNotificationAsRead,
+	} = useCandidateNotifications({
+		apiBase: API_BASE,
+		candidateId,
+		selectedView,
+	})
+	const {
+		settingsForm,
+		settingsSaving,
+		settingsMessage,
+		settingsError,
+		settingsPhotoError,
+		settingsCvFile,
+		settingsCvUploading,
+		settingsCvMessage,
+		settingsCvError,
+		setSettingsCvMessage,
+		setSettingsCvError,
+		passwordForm,
+		passwordSaving,
+		passwordMessage,
+		passwordError,
+		isCustomCountry,
+		selectedCountryValue,
+		setSettingsCvFile,
+		updateSettingsField,
+		handleSettingsPhotoSelect,
+		handleSaveProfile,
+		handleUploadCvFromSettings,
+		updatePasswordField,
+		handleChangePassword,
+	} = useCandidateSettings({
+		apiBase: API_BASE,
+		candidate,
+		setCandidate,
+		setSelectedView,
+	})
 
 	useEffect(() => {
 		try {
@@ -693,49 +387,6 @@ function DashboardCand() {
 		}
 	}, [candidate, selectedView, selectedJobId, offerHelpHydrated, offerHelpChatId, offerHelpMessages.length])
 
-	const fetchNotifications = async (candidateId) => {
-		if (!candidateId) return
-		setNotificationsLoading(true)
-		setNotificationsError('')
-		try {
-			const res = await fetch(`${API_BASE}/notifications/candidate/${candidateId}?limit=50`)
-			const data = await res.json().catch(() => ({}))
-			if (!res.ok || !data?.success) {
-				throw new Error(data?.message || 'Impossible de charger les notifications.')
-			}
-			setNotifications(Array.isArray(data.notifications) ? data.notifications : [])
-			setNotificationsUnreadCount(Number(data.unreadCount) || 0)
-		} catch (e) {
-			setNotificationsError(String(e?.message || 'Erreur'))
-			setNotifications([])
-			setNotificationsUnreadCount(0)
-		} finally {
-			setNotificationsLoading(false)
-		}
-	}
-
-	const markNotificationAsRead = async (notificationId) => {
-		if (!notificationId) return
-		setNotificationsError('')
-		try {
-			const res = await fetch(`${API_BASE}/notifications/${notificationId}/read`, { method: 'PATCH' })
-			const data = await res.json().catch(() => ({}))
-			if (!res.ok || !data?.success) {
-				throw new Error(data?.message || 'Impossible de marquer comme lue.')
-			}
-			setNotifications((prev) => prev.map((n) => (n._id === notificationId ? data.notification : n)))
-			setNotificationsUnreadCount((prev) => Math.max(0, prev - 1))
-		} catch (e) {
-			setNotificationsError(String(e?.message || 'Erreur'))
-		}
-	}
-
-	const handleJoinInterview = (meetingLink, interviewId) => {
-		if (!meetingLink) return
-		const displayName = `${candidate?.firstName || ''} ${candidate?.lastName || ''}`.trim() || candidate?.email || 'Candidat AIR'
-		const interviewQuery = interviewId ? `&interviewId=${encodeURIComponent(interviewId)}` : ''
-		navigate(`/meet?url=${encodeURIComponent(meetingLink)}&name=${encodeURIComponent(displayName)}&role=candidat${interviewQuery}`)
-	}
 
 	const menuGroups = useMemo(
 		() => [
@@ -768,267 +419,6 @@ function DashboardCand() {
 	)
 
 	useEffect(() => {
-		if (!candidate) return
-		const birth = candidate?.birthDate ? new Date(candidate.birthDate) : null
-		const birthValue = birth && !Number.isNaN(birth.getTime()) ? birth.toISOString().slice(0, 10) : ''
-		setSettingsForm({
-			firstName: candidate?.firstName || '',
-			lastName: candidate?.lastName || '',
-			email: candidate?.email || '',
-			country: candidate?.country || '',
-			birthDate: birthValue,
-			professionalTitle: candidate?.professionalTitle || '',
-			sector: candidate?.sector || '',
-			experienceLevel: candidate?.experienceLevel || 'junior',
-			portfolioUrl: candidate?.portfolioUrl || '',
-			profileImage: candidate?.profileImage || '',
-		})
-	}, [candidate])
-
-	const updateSettingsField = (field, value) => {
-		setSettingsForm((prev) => ({ ...prev, [field]: value }))
-	}
-
-	const handleSettingsPhotoSelect = (e) => {
-		const file = e.target.files?.[0] || null
-		if (!file) return
-
-		setSettingsPhotoError('')
-		if (!String(file.type || '').startsWith('image/')) {
-			setSettingsPhotoError('Choisissez une image valide (JPG, PNG, WEBP...).')
-			return
-		}
-		if (file.size > 2 * 1024 * 1024) {
-			setSettingsPhotoError('Image trop volumineuse (max 2 MB).')
-			return
-		}
-
-		const reader = new FileReader()
-		reader.onload = () => {
-			const dataUrl = typeof reader.result === 'string' ? reader.result : ''
-			if (!dataUrl) {
-				setSettingsPhotoError('Impossible de lire le fichier image.')
-				return
-			}
-			updateSettingsField('profileImage', dataUrl)
-		}
-		reader.onerror = () => {
-			setSettingsPhotoError('Impossible de lire le fichier image.')
-		}
-		reader.readAsDataURL(file)
-	}
-
-	const handleSaveProfile = async (e) => {
-		e.preventDefault()
-		setSettingsMessage('')
-		setSettingsError('')
-		if (!candidate) {
-			setSettingsError('Session candidat invalide.')
-			return
-		}
-		const candidateId = candidate?.id || candidate?._id
-		if (!candidateId) {
-			setSettingsError('Session candidat invalide.')
-			return
-		}
-
-		setSettingsSaving(true)
-		try {
-			const countryToSave = settingsForm.country === SETTINGS_COUNTRY_OTHER ? '' : settingsForm.country
-			const res = await fetch(`${API_BASE}/candidates/${candidateId}`, {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					firstName: settingsForm.firstName,
-					lastName: settingsForm.lastName,
-					email: settingsForm.email,
-					country: countryToSave,
-					birthDate: settingsForm.birthDate,
-					professionalTitle: settingsForm.professionalTitle,
-					sector: settingsForm.sector,
-					experienceLevel: settingsForm.experienceLevel,
-					portfolioUrl: settingsForm.portfolioUrl,
-					profileImage: settingsForm.profileImage,
-				}),
-			})
-			const data = await res.json().catch(() => ({}))
-			if (!res.ok || !data?.success) {
-				setSettingsError(data?.message || 'Impossible de sauvegarder le profil.')
-				return
-			}
-			const nextCandidate = { ...(candidate || {}), ...(data.candidate || {}) }
-			setCandidate(nextCandidate)
-			localStorage.setItem('airCandidate', JSON.stringify(nextCandidate))
-			setSettingsMessage(data?.message || 'Profil mis à jour.')
-		} catch (err) {
-			setSettingsError('Serveur indisponible. Vérifiez que le backend tourne.')
-		} finally {
-			setSettingsSaving(false)
-		}
-	}
-
-	const handleUploadCvFromSettings = async () => {
-		setSettingsCvMessage('')
-		setSettingsCvError('')
-		if (!settingsCvFile) {
-			setSettingsCvError('Choisissez un fichier CV (PDF/HTML).')
-			return
-		}
-		const candidateId = candidate?.id || candidate?._id
-		if (!candidateId) {
-			setSettingsCvError('Session candidat invalide.')
-			return
-		}
-		setSettingsCvUploading(true)
-		try {
-			const fd = new FormData()
-			fd.append('candidateId', candidateId)
-			fd.append('cvFile', settingsCvFile)
-			const res = await fetch(`${API_BASE}/cv/upload`, { method: 'POST', body: fd })
-			const data = await res.json().catch(() => ({}))
-			if (!res.ok || !data?.success) {
-				setSettingsCvError(data?.message || 'Upload CV impossible.')
-				return
-			}
-			setSettingsCvMessage(data?.message || 'CV uploadé.')
-			setSettingsCvFile(null)
-			setSelectedView('cv')
-		} catch {
-			setSettingsCvError('Serveur indisponible. Vérifiez que le backend tourne.')
-		} finally {
-			setSettingsCvUploading(false)
-		}
-	}
-
-	const updatePasswordField = (field, value) => {
-		setPasswordForm((prev) => ({ ...prev, [field]: value }))
-	}
-
-	const handleChangePassword = async (e) => {
-		e.preventDefault()
-		setPasswordMessage('')
-		setPasswordError('')
-		const candidateId = candidate?.id || candidate?._id
-		if (!candidateId) {
-			setPasswordError('Session candidat invalide.')
-			return
-		}
-		if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword || !passwordForm.verificationCode) {
-			setPasswordError('Tous les champs, y compris le code de verification, sont requis.')
-			return
-		}
-		if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-			setPasswordError('La confirmation ne correspond pas.')
-			return
-		}
-		if (String(passwordForm.newPassword).length < 8) {
-			setPasswordError('Le mot de passe doit contenir au moins 8 caractères.')
-			return
-		}
-
-		setPasswordSaving(true)
-		try {
-			const res = await fetch(`${API_BASE}/candidates/${candidateId}/password`, {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					currentPassword: passwordForm.currentPassword,
-					newPassword: passwordForm.newPassword,
-					verificationCode: passwordForm.verificationCode,
-				}),
-			})
-			const data = await res.json().catch(() => ({}))
-			if (!res.ok || !data?.success) {
-				setPasswordError(data?.message || 'Impossible de changer le mot de passe.')
-				return
-			}
-			setPasswordMessage(data?.message || 'Mot de passe mis à jour.')
-			setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '', verificationCode: '' })
-		} catch {
-			setPasswordError('Serveur indisponible. Vérifiez que le backend tourne.')
-		} finally {
-			setPasswordSaving(false)
-		}
-	}
-
-	const handleRequestPasswordCode = async () => {
-		setPasswordMessage('')
-		setPasswordError('')
-		const candidateId = candidate?.id || candidate?._id
-		if (!candidateId) {
-			setPasswordError('Session candidat invalide.')
-			return
-		}
-
-		setPasswordCodeSending(true)
-		try {
-			const res = await fetch(`${API_BASE}/candidates/${candidateId}/password/otp/request`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-			})
-			const data = await res.json().catch(() => ({}))
-			if (!res.ok || !data?.success) {
-				setPasswordError(data?.message || "Impossible d'envoyer le code.")
-				return
-			}
-			setPasswordMessage(data?.message || 'Code de verification envoye par email.')
-		} catch {
-			setPasswordError('Serveur indisponible. Vérifiez que le backend tourne.')
-		} finally {
-			setPasswordCodeSending(false)
-		}
-	}
-
-	const handleSubmitAppFeedback = async (e) => {
-		e.preventDefault()
-		setAppFeedbackMessage('')
-		setAppFeedbackError('')
-
-		const candidateId = candidate?.id || candidate?._id
-		if (!candidateId) {
-			setAppFeedbackError('Session candidat invalide.')
-			return
-		}
-		if (!Number.isFinite(appFeedbackForm.rating) || appFeedbackForm.rating < 1 || appFeedbackForm.rating > 5) {
-			setAppFeedbackError('Veuillez choisir une note entre 1 et 5 etoiles.')
-			return
-		}
-
-		setAppFeedbackSaving(true)
-		try {
-			const res = await fetch(`${API_BASE}/app-feedback`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					userId: candidateId,
-					userRole: 'candidate',
-					rating: appFeedbackForm.rating,
-					comment: appFeedbackForm.comment,
-				}),
-			})
-			const data = await res.json().catch(() => ({}))
-			if (!res.ok || !data?.success) {
-				setAppFeedbackError(data?.message || 'Impossible d enregistrer votre feedback.')
-				return
-			}
-
-			setAppFeedbackMessage(data?.message || 'Merci pour votre feedback.')
-			const summaryRes = await fetch(`${API_BASE}/app-feedback/summary`)
-			const summaryData = await summaryRes.json().catch(() => ({}))
-			if (summaryRes.ok && summaryData?.success && summaryData?.summary) {
-				setAppFeedbackSummary({
-					averageRating: Number.isFinite(summaryData.summary.averageRating) ? Number(summaryData.summary.averageRating) : null,
-					totalFeedbacks: Number(summaryData.summary.totalFeedbacks || 0),
-				})
-			}
-		} catch {
-			setAppFeedbackError('Serveur indisponible. Vérifiez que le backend tourne.')
-		} finally {
-			setAppFeedbackSaving(false)
-		}
-	}
-
-	useEffect(() => {
 		const stored = localStorage.getItem('airCandidate')
 		if (!stored) {
 			navigate('/connecter')
@@ -1046,46 +436,6 @@ function DashboardCand() {
 			navigate('/connecter')
 		}
 	}, [navigate])
-
-	useEffect(() => {
-		const candidateId = candidate?.id || candidate?._id
-		if (!candidateId) return
-
-		let cancelled = false
-		const fetchAppFeedback = async () => {
-			try {
-				const [mineRes, summaryRes] = await Promise.all([
-					fetch(`${API_BASE}/app-feedback/mine?userId=${encodeURIComponent(candidateId)}&userRole=candidate`),
-					fetch(`${API_BASE}/app-feedback/summary`),
-				])
-				const mineData = await mineRes.json().catch(() => ({}))
-				const summaryData = await summaryRes.json().catch(() => ({}))
-				if (cancelled) return
-
-				if (mineRes.ok && mineData?.success && mineData?.feedback) {
-					setAppFeedbackForm({
-						rating: Number(mineData.feedback.rating || 0),
-						comment: String(mineData.feedback.comment || ''),
-					})
-				}
-				if (summaryRes.ok && summaryData?.success && summaryData?.summary) {
-					setAppFeedbackSummary({
-						averageRating: Number.isFinite(summaryData.summary.averageRating) ? Number(summaryData.summary.averageRating) : null,
-						totalFeedbacks: Number(summaryData.summary.totalFeedbacks || 0),
-					})
-				}
-			} catch {
-				if (!cancelled) {
-					setAppFeedbackSummary((prev) => ({ ...prev }))
-				}
-			}
-		}
-
-		fetchAppFeedback()
-		return () => {
-			cancelled = true
-		}
-	}, [candidate?.id, candidate?._id])
 
 	useEffect(() => {
 		const candidateId = candidate?.id || candidate?._id
@@ -1239,13 +589,6 @@ function DashboardCand() {
 			cancelled = true
 		}
 	}, [candidate, jobs])
-
-	useEffect(() => {
-		if (!candidate) return
-		const candidateId = candidate?.id || candidate?._id
-		if (!candidateId) return
-		fetchNotifications(candidateId)
-	}, [candidate])
 
 	useEffect(() => {
 		const candidateId = candidate?.id || candidate?._id
@@ -1405,13 +748,7 @@ function DashboardCand() {
 		}
 	}, [dashboardStats, interviewCalendarMonth])
 	
-	useEffect(() => {
-		if (selectedView !== 'notifications') return
-		const candidateId = candidate?.id || candidate?._id
-		if (!candidateId) return
-		fetchNotifications(candidateId)
-	}, [selectedView, candidate])
-
+	
 	useEffect(() => {
 		if (selectedView !== 'cv') return
 		const candidateId = candidate?.id || candidate?._id
@@ -1640,15 +977,7 @@ function DashboardCand() {
 		return 'Bonsoir'
 	}, [currentTime])
 
-	const contractOptions = useMemo(() => {
-		return Array.from(new Set(jobs.map((j) => String(j?.type || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
-	}, [jobs])
-
-	const workModeOptions = useMemo(() => {
-		return Array.from(new Set(jobs.map((j) => String(j?.workMode || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
-	}, [jobs])
-
-	const visibleJobs = useMemo(() => {
+	const filtered = useMemo(() => {
 		const q = searchQuery.trim().toLowerCase()
 		const hasMinSalary = String(salaryMin || '').trim() !== ''
 		const hasMaxSalary = String(salaryMax || '').trim() !== ''
@@ -1658,21 +987,10 @@ function DashboardCand() {
 		const maxSalaryValue = hasMaxSalary ? Number(salaryMax) : null
 		const minExpValue = hasMinExp ? Number(experienceMinYears) : null
 
-		const list = jobs.filter((j) => {
+		return jobs.filter((j) => {
 			if (q) {
-				const hay = `${j.title} ${j.location} ${j.company} ${j.desc || ''} ${(j.tags || []).join(' ')}`.toLowerCase()
+				const hay = `${j.title} ${j.location} ${j.company} ${j.desc || ''}`.toLowerCase()
 				if (!hay.includes(q)) return false
-			}
-
-			if (showSavedOnly && !savedJobs.has(j.id)) return false
-			if (contractFilter !== 'all' && String(j?.type || '') !== contractFilter) return false
-			if (workModeFilter !== 'all' && String(j?.workMode || '') !== workModeFilter) return false
-
-			if (matchFilter !== 'all') {
-				const score = Number.isFinite(j?.matchScore) ? j.matchScore : -1
-				if (matchFilter === '70' && score < 70) return false
-				if (matchFilter === '45' && score < 45) return false
-				if (matchFilter === 'known' && score < 0) return false
 			}
 
 			if (hasMinSalary || hasMaxSalary) {
@@ -1691,63 +1009,7 @@ function DashboardCand() {
 
 			return true
 		})
-
-		const salaryValue = (job) => {
-			const range = parseSalaryRange(job?.salary)
-			if (!range) return -1
-			return (range.min + range.max) / 2
-		}
-
-		list.sort((a, b) => {
-			const aMatch = Number.isFinite(a?.matchScore) ? a.matchScore : -1
-			const bMatch = Number.isFinite(b?.matchScore) ? b.matchScore : -1
-			const aDate = new Date(a?.createdAt || 0).getTime() || 0
-			const bDate = new Date(b?.createdAt || 0).getTime() || 0
-			const aSalary = salaryValue(a)
-			const bSalary = salaryValue(b)
-
-			if (sortBy === 'recent') {
-				if (bDate !== aDate) return bDate - aDate
-				return bMatch - aMatch
-			}
-			if (sortBy === 'salaryDesc') {
-				if (bSalary !== aSalary) return bSalary - aSalary
-				return bMatch - aMatch
-			}
-			if (sortBy === 'salaryAsc') {
-				if (aSalary !== bSalary) return aSalary - bSalary
-				return bMatch - aMatch
-			}
-
-			if (bMatch !== aMatch) return bMatch - aMatch
-			return bDate - aDate
-		})
-
-		return list
-	}, [searchQuery, salaryMin, salaryMax, experienceMinYears, showSavedOnly, contractFilter, workModeFilter, matchFilter, sortBy, jobs, savedJobs])
-
-	const hasActiveOfferFilters = useMemo(() => {
-		return Boolean(
-			searchQuery.trim() ||
-			salaryMin ||
-			salaryMax ||
-			experienceMinYears ||
-			showSavedOnly ||
-			contractFilter !== 'all' ||
-			workModeFilter !== 'all' ||
-			matchFilter !== 'all' ||
-			sortBy !== 'match'
-		)
-	}, [searchQuery, salaryMin, salaryMax, experienceMinYears, showSavedOnly, contractFilter, workModeFilter, matchFilter, sortBy])
-
-	useEffect(() => {
-		if (selectedView !== 'offres') return
-		if (visibleJobs.length === 0) return
-		const selectedVisible = visibleJobs.some((j) => j.id === selectedJobId)
-		if (selectedVisible) return
-		setSelectedJobId(visibleJobs[0].id)
-		setApplyStatus(null)
-	}, [selectedView, visibleJobs, selectedJobId])
+	}, [searchQuery, salaryMin, salaryMax, experienceMinYears, jobs])
 
 	const selectedJob = useMemo(() => {
 		if (!selectedJobId && jobs.length > 0) return jobs[0]
@@ -1877,6 +1139,14 @@ function DashboardCand() {
 
 	const handleQuizAnswerChange = (questionId, optionKey) => {
 		setQuizAnswers((prev) => ({ ...prev, [questionId]: optionKey }))
+	}
+
+	const handleCloseQuizModal = () => {
+		if (quizSubmitting || isApplying) return
+		setQuizOpen(false)
+		setQuizError('')
+		setQuizSecondsLeft(0)
+		quizTimedOutRef.current = false
 	}
 
 	const handleSubmitQuizAndApply = async ({ forceSubmit = false } = {}) => {
@@ -2093,1580 +1363,151 @@ function DashboardCand() {
 						</div>
 
 						{selectedView === 'offres' ? (
-							<div className='mt-8 space-y-6'>
-								{loadError ? (
-									<div className='rounded-2xl border border-rose-200 bg-rose-50 p-4'>
-										<p className='text-sm font-semibold text-rose-800'>{loadError}</p>
-									</div>
-								) : null}
-								<div className='overflow-hidden rounded-3xl border border-[#9fc3e1] bg-gradient-to-br from-[#f8fcff] via-[#eef7ff] to-[#e4f1fb] shadow-[0_16px_36px_rgba(8,51,93,0.12)]'>
-									<div className='relative border-b border-[#0d355b]/20 bg-gradient-to-r from-[#001d3e] via-[#0d355b] to-[#0a5f88] px-5 py-4'>
-										<div className='absolute -right-12 -top-10 h-28 w-28 rounded-full bg-cyan-300/20 blur-2xl' />
-										<div className='relative flex flex-wrap items-center justify-between gap-2'>
-											<div>
-												<p className='text-[11px] font-black tracking-[0.14em] text-cyan-100'>RECHERCHE ET FILTRES</p>
-												<p className='mt-1 text-xs font-semibold text-cyan-50/90'>Affinez les offres selon votre profil et vos priorités</p>
-											</div>
-											<Badge variant='cyan'>{visibleJobs.length} résultats</Badge>
-										</div>
-									</div>
-
-									<div className='space-y-4 p-4 sm:p-5'>
-										<div className='grid gap-3 xl:grid-cols-[1.15fr_0.45fr_0.4fr]'>
-											<div className='flex items-center gap-3 rounded-2xl border border-[#c6dff2] bg-white px-4 py-3 shadow-[0_4px_12px_rgba(8,51,93,0.05)]'>
-												<span className='text-lg text-[#4f7ea6]'>🔎</span>
-												<input
-													type='text'
-													placeholder='Poste, entreprise, lieu, compétence...'
-													value={searchQuery}
-													onChange={(e) => setSearchQuery(e.target.value)}
-													className='w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
-												/>
-												{searchQuery ? (
-													<button
-														type='button'
-														onClick={() => setSearchQuery('')}
-														className='rounded-lg border border-[#d4e5f4] bg-[#f7fbff] px-2.5 py-1 text-xs font-semibold text-[#2b587f] transition hover:bg-[#edf6ff]'
-													>
-														Effacer
-													</button>
-												) : null}
-											</div>
-
-											<select
-												value={sortBy}
-												onChange={(e) => setSortBy(e.target.value)}
-												className='rounded-2xl border border-[#c6dff2] bg-white px-4 py-3 text-sm font-semibold text-[#1e4268] outline-none shadow-[0_4px_12px_rgba(8,51,93,0.04)]'
-											>
-												<option value='match'>Tri: meilleur match</option>
-												<option value='recent'>Tri: plus récent</option>
-												<option value='salaryDesc'>Tri: salaire décroissant</option>
-												<option value='salaryAsc'>Tri: salaire croissant</option>
-											</select>
-
-											<button
-												type='button'
-												onClick={() => setShowSavedOnly((prev) => !prev)}
-												className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
-													showSavedOnly
-														? 'border-[#0a5f88] bg-[#0a5f88] text-white shadow-[0_8px_16px_rgba(10,95,136,0.28)]'
-														: 'border-[#c6dff2] bg-white text-[#1e4268] hover:bg-[#eef7ff]'
-												}`}
-											>
-												{showSavedOnly ? 'Favoris uniquement' : 'Afficher favoris'}
-											</button>
-										</div>
-
-										<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
-											<div className='rounded-2xl border border-[#c6dff2] bg-white px-4 py-3'>
-												<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>TYPE DE CONTRAT</p>
-												<select
-													value={contractFilter}
-													onChange={(e) => setContractFilter(e.target.value)}
-													className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none'
-												>
-													<option value='all'>Tous</option>
-													{contractOptions.map((option) => (
-														<option key={option} value={option}>
-															{option}
-														</option>
-													))}
-												</select>
-											</div>
-
-											<div className='rounded-2xl border border-[#c6dff2] bg-white px-4 py-3'>
-												<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>MODE DE TRAVAIL</p>
-												<select
-													value={workModeFilter}
-													onChange={(e) => setWorkModeFilter(e.target.value)}
-													className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none'
-												>
-													<option value='all'>Tous</option>
-													{workModeOptions.map((option) => (
-														<option key={option} value={option}>
-															{option}
-														</option>
-													))}
-												</select>
-											</div>
-
-											<div className='rounded-2xl border border-[#c6dff2] bg-white px-4 py-3'>
-												<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>MATCH CV MINIMUM</p>
-												<select
-													value={matchFilter}
-													onChange={(e) => setMatchFilter(e.target.value)}
-													className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none'
-												>
-													<option value='all'>Tous</option>
-													<option value='70'>70% et +</option>
-													<option value='45'>45% et +</option>
-													<option value='known'>Match disponible</option>
-												</select>
-											</div>
-
-											<div className='rounded-2xl border border-[#c6dff2] bg-white px-4 py-3'>
-												<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>EXPÉRIENCE / SALAIRE (TND)</p>
-												<div className='mt-1 grid grid-cols-3 gap-2'>
-													<input
-														type='number'
-														inputMode='numeric'
-														placeholder='Exp min'
-														value={experienceMinYears}
-														onChange={(e) => setExperienceMinYears(e.target.value)}
-														className='w-full rounded-lg border border-[#d4e5f4] bg-[#fbfdff] px-2 py-1 text-xs font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
-													/>
-													<input
-														type='number'
-														inputMode='numeric'
-														placeholder='Salaire min'
-														value={salaryMin}
-														onChange={(e) => setSalaryMin(e.target.value)}
-														className='w-full rounded-lg border border-[#d4e5f4] bg-[#fbfdff] px-2 py-1 text-xs font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
-													/>
-													<input
-														type='number'
-														inputMode='numeric'
-														placeholder='Salaire max'
-														value={salaryMax}
-														onChange={(e) => setSalaryMax(e.target.value)}
-														className='w-full rounded-lg border border-[#d4e5f4] bg-[#fbfdff] px-2 py-1 text-xs font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
-													/>
-												</div>
-											</div>
-										</div>
-
-										<div className='flex flex-wrap items-center justify-between gap-2'>
-											<p className='text-xs font-semibold text-[#4f7191]'>
-												{hasActiveOfferFilters ? 'Filtres actifs appliqués sur les offres.' : 'Aucun filtre actif.'}
-											</p>
-											<button
-												type='button'
-												onClick={() => {
-													setSearchQuery('')
-													setSalaryMin('')
-													setSalaryMax('')
-													setExperienceMinYears('')
-													setSortBy('match')
-													setContractFilter('all')
-													setWorkModeFilter('all')
-													setMatchFilter('all')
-													setShowSavedOnly(false)
-												}}
-												className='rounded-xl border border-[#001d3e] bg-[#001d3e] px-4 py-2 text-xs font-semibold text-white transition hover:opacity-95'
-											>
-												Réinitialiser
-											</button>
-										</div>
-									</div>
-								</div>
-
-								<div className='grid gap-6 lg:grid-cols-[1.2fr_0.95fr]'>
-									<div className='overflow-hidden rounded-2xl border border-[#b6cfe6] bg-white shadow-[0_8px_20px_rgba(8,51,93,0.08)]'>
-										<div className='flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3'>
-											<p className='text-sm font-semibold text-slate-700'>
-												<span className='font-black text-[#0d355b]'>{visibleJobs.length}</span> offres correspondent
-											</p>
-											<p className='text-xs font-semibold text-slate-500'>
-												{cvMatchLoading ? 'Analyse CV en cours…' : cvMatchError ? 'Analyse CV indisponible' : 'Cliquez une offre pour voir le détail'}
-											</p>
-										</div>
-
-										<div className='max-h-[620px] overflow-y-auto p-4'>
-											<div className='space-y-3'>
-												{visibleJobs.map((j) => {
-													const active = selectedJob?.id === j.id
-													const saved = savedJobs.has(j.id)
-													return (
-															<div
-															key={j.id}
-																className={`relative w-full rounded-2xl border border-l-4 transition ${active ? 'border-cyan-300 border-l-[#0a5f88] bg-gradient-to-r from-cyan-50 to-white shadow-[0_10px_20px_rgba(9,84,129,0.12)]' : 'border-slate-200 border-l-[#0d355b]/20 bg-white hover:border-[#b9d5ea] hover:bg-[#fbfdff]'}`}
-														>
-															<button
-																type='button'
-																onClick={() => {
-																setSelectedJobId(j.id)
-																setApplyStatus(null)
-															}}
-																className='w-full cursor-pointer rounded-2xl p-4 text-left'
-															>
-																<div className='flex items-start gap-3'>
-																	<div className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl shadow-[0_2px_8px_rgba(15,55,94,0.1)]'>
-																		{j.emoji}
-																	</div>
-																	<div className='min-w-0 flex-1 pr-10'>
-																		<div className='flex items-start justify-between gap-3'>
-																			<div>
-																				<p className='text-sm font-black text-[#103b62]'>{j.title}</p>
-																				<p className='mt-1 text-xs text-[#587a99]'>
-																					{j.company} · {j.location}
-																				</p>
-																			</div>
-																			<div className='flex items-center gap-2'>
-																				<Badge variant={j.type === 'CDI' ? 'emerald' : 'violet'}>{j.type}</Badge>
-																				{Number.isFinite(j.matchScore) ? (
-																					<Badge variant={j.matchScore >= 70 ? 'emerald' : j.matchScore >= 45 ? 'cyan' : 'amber'}>Match {j.matchScore}%</Badge>
-																				) : null}
-																			</div>
-																		</div>
-																		<div className='mt-3 flex flex-wrap items-center justify-between gap-3'>
-																			<div className='flex flex-wrap gap-2'>
-																			{j.tags?.slice(0, 3).map((t) => (
-																				<Tag key={t}>{t}</Tag>
-																			))}
-																			{j.tags?.length > 3 ? <Tag>+{j.tags.length - 3}</Tag> : null}
-																		</div>
-																		<div className='flex items-center gap-2'>
-																			{j.featured ? <Badge variant='amber'>Vedette</Badge> : null}
-																			<span className='text-xs font-semibold text-slate-500'>{j.posted}</span>
-																		</div>
-																		</div>
-																	</div>
-																</div>
-															</button>
-															<button
-																type='button'
-																onClick={(e) => toggleSave(e, j.id)}
-																className='absolute right-4 top-4 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm text-slate-600 hover:bg-slate-50'
-																aria-label={saved ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-															>
-																{saved ? '♥' : '♡'}
-															</button>
-														</div>
-													)
-												})}
-											</div>
-										</div>
-									</div>
-
-									<div className='flex flex-col gap-4'>
-										{visibleJobs.length === 0 ? (
-											<div className='rounded-2xl border border-dashed border-[#b9d5ea] bg-[#f7fbff] p-6 text-center'>
-												<p className='text-sm font-bold text-[#103b62]'>Aucune offre ne correspond à vos critères.</p>
-												<p className='mt-1 text-xs text-[#587b9c]'>Essayez de retirer un filtre ou d’élargir votre recherche.</p>
-											</div>
-										) : null}
-
-										{visibleJobs.length > 0 && selectedJob ? (
-											<div className='overflow-hidden rounded-2xl border border-[#0d355b]/25 bg-white shadow-[0_10px_24px_rgba(8,51,93,0.12)]'>
-												<div className='border-b border-[#0d355b]/15 bg-gradient-to-r from-[#f2f8ff] to-white p-5'>
-													<div className='flex items-start justify-between gap-3'>
-														<div className='flex items-center gap-3'>
-															<div className='flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-2xl'>
-																{selectedJob.emoji}
-															</div>
-															<div className='min-w-0'>
-																<p className='text-lg font-black text-[#0d355b]'>{selectedJob.title}</p>
-																<p className='mt-1 text-sm text-[#587a99]'>
-																	{selectedJob.company} · {selectedJob.location}
-																</p>
-															</div>
-														</div>
-														<button
-															type='button'
-															onClick={(e) => toggleSave(e, selectedJob.id)}
-															className='rounded-xl border border-[#0d355b]/20 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'
-														>
-															{savedJobs.has(selectedJob.id) ? 'Retirer ♥' : 'Favoris ♡'}
-														</button>
-													</div>
-
-													<div className='mt-4 flex flex-wrap gap-2'>
-														<Badge variant={selectedJob.type === 'CDI' ? 'emerald' : 'violet'}>{selectedJob.type}</Badge>
-														{selectedJob.featured ? <Badge variant='amber'>En vedette</Badge> : null}
-																	{selectedJob.workMode ? <Badge variant='blue'>{selectedJob.workMode}</Badge> : null}
-																	{Number.isFinite(selectedJob.matchScore) ? (
-																		<Badge variant={selectedJob.matchScore >= 70 ? 'emerald' : selectedJob.matchScore >= 45 ? 'cyan' : 'amber'}>
-																			Match {selectedJob.matchScore}%
-																		</Badge>
-																	) : null}
-													</div>
-
-													<div className='mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3'>
-														<div className='rounded-2xl border border-[#0d355b]/15 bg-slate-50 p-3'>
-															<p className='text-xs font-semibold text-slate-600'>Contrat</p>
-															<p className='mt-1 break-words text-lg font-black leading-tight text-[#0d355b]'>{selectedJob.type}</p>
-														</div>
-														<div className='rounded-2xl border border-[#0d355b]/15 bg-slate-50 p-3'>
-															<p className='text-xs font-semibold text-slate-600'>Clôture</p>
-															<p className='mt-1 break-words text-lg font-black leading-tight text-amber-700'>{selectedJob.closes}</p>
-														</div>
-														<div className='rounded-2xl border border-[#0d355b]/15 bg-slate-50 p-3'>
-															<p className='text-xs font-semibold text-slate-600'>TND/mois</p>
-															<p className='mt-1 break-words text-lg font-black leading-tight text-[#103b62]'>{selectedJob.salary}</p>
-														</div>
-													</div>
-
-															{effectiveApplyStatus ? (
-																<div
-																	className={`mt-4 rounded-2xl border p-4 ${
-																		effectiveApplyStatus.type === 'success'
-																			? 'border-emerald-200 bg-emerald-50'
-																		: effectiveApplyStatus.type === 'error'
-																				? 'border-rose-200 bg-rose-50'
-																			: 'border-cyan-200 bg-cyan-50'
-																	}`}
-																>
-																<p
-																	className={`text-sm font-semibold ${
-																		effectiveApplyStatus.type === 'success'
-																			? 'text-emerald-800'
-																		: effectiveApplyStatus.type === 'error'
-																				? 'text-rose-800'
-																			: 'text-[#0a5f88]'
-																	}`}
-																>
-																	{effectiveApplyStatus.message}
-																</p>
-																<div className='mt-2'>
-																	<button
-																		type='button'
-																		onClick={() => setSelectedView('candidatures')}
-																		className='rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50'
-																	>
-																		Voir mes candidatures
-																	</button>
-																</div>
-															</div>
-														) : null}
-
-															<button
-																type='button'
-																onClick={handleApply}
-																disabled={isApplying || quizLoading || selectedJobAlreadyApplied}
-																className={`mt-4 w-full rounded-2xl py-3 text-sm font-bold text-white transition ${
-																	isApplying || quizLoading || selectedJobAlreadyApplied ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'
-																}`}
-															>
-																{quizLoading ? 'Generation quiz...' : isApplying ? 'Envoi en cours...' : selectedJobAlreadyApplied ? 'Deja postule' : 'Passer le quiz et postuler'}
-															</button>
-												</div>
-
-												<div className='max-h-[520px] overflow-y-auto p-5'>
-													<div>
-														<p className='text-[12px] font-black tracking-[0.12em] text-[#0d355b]'>DESCRIPTION DE L’OFFRE</p>
-														<p className='mt-2 whitespace-pre-line text-sm leading-7 text-slate-600'>
-															{selectedJob.desc || 'Aucune description fournie.'}
-														</p>
-													</div>
-
-													{selectedJob.missions && selectedJob.missions.length > 0 && (
-																<div className='mt-6'>
-																	<p className='text-[12px] font-black tracking-[0.12em] text-[#0d355b]'>MISSIONS PRINCIPALES</p>
-																	<div className='mt-3 space-y-2'>
-																		{selectedJob.missions.map((m) => (
-																			<div key={m} className='flex items-start gap-2'>
-																				<span className='mt-1 text-cyan-600'>→</span>
-																				<p className='text-sm text-slate-600'>{m}</p>
-																			</div>
-																		))}
-																	</div>
-																</div>
-													)}
-
-													{selectedJob.cvMatch && selectedJob.cvMatch.length > 0 ? (
-														<div className='mt-6'>
-															<p className='text-[12px] font-black tracking-[0.12em] text-[#0d355b]'>MOTS-CLÉS VS VOTRE CV</p>
-															<div className='mt-3 space-y-2'>
-																{selectedJob.cvMatch.map(({ kw, ok }) => (
-																	<div
-																		key={kw}
-																		className={`flex items-center gap-3 rounded-xl border px-3 py-2 ${ok ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}
-																	>
-																		<span className='text-sm'>{ok ? '✅' : '❌'}</span>
-																		<span className='flex-1 text-sm font-semibold text-slate-700'>{kw}</span>
-																		<span className={`text-xs font-bold ${ok ? 'text-emerald-700' : 'text-rose-700'}`}>{ok ? 'Dans votre CV' : 'À ajouter'}</span>
-																	</div>
-																))}
-															</div>
-
-															{selectedJob.cvMatch.some((m) => !m.ok) ? (
-																<div className='mt-4 rounded-2xl border border-cyan-200 bg-cyan-50 p-4'>
-																	<p className='text-sm font-semibold text-[#0a5f88]'>
-																		Conseil: Ajoutez {selectedJob.cvMatch.filter((m) => !m.ok).map((m) => m.kw).join(', ')} à votre CV avant de postuler.
-																	</p>
-																</div>
-															) : null}
-														</div>
-													) : null}
-												</div>
-											</div>
-										) : null}
-									</div>
-								</div>
-							</div>
+							<DashboardCandOffresView
+								loadError={loadError}
+								searchQuery={searchQuery}
+								setSearchQuery={setSearchQuery}
+								salaryMin={salaryMin}
+								setSalaryMin={setSalaryMin}
+								salaryMax={salaryMax}
+								setSalaryMax={setSalaryMax}
+								experienceMinYears={experienceMinYears}
+								setExperienceMinYears={setExperienceMinYears}
+								filtered={filtered}
+								cvMatchLoading={cvMatchLoading}
+								cvMatchError={cvMatchError}
+								selectedJob={selectedJob}
+								savedJobs={savedJobs}
+								toggleSave={toggleSave}
+								setSelectedJobId={setSelectedJobId}
+								setApplyStatus={setApplyStatus}
+								effectiveApplyStatus={effectiveApplyStatus}
+								setSelectedView={setSelectedView}
+								handleApply={handleApply}
+								isApplying={isApplying}
+								quizLoading={quizLoading}
+								selectedJobAlreadyApplied={selectedJobAlreadyApplied}
+							/>
 						) : selectedView === 'cv' ? (
-							<div className='mt-8 rounded-2xl border border-[#9fc3e1] bg-gradient-to-br from-[#f7fbff] via-[#edf6ff] to-[#deedfb] p-5 ring-1 ring-[#bdd8ef] shadow-[0_14px_34px_rgba(8,51,93,0.13)]'>
-								<div className='flex items-start justify-between gap-3 flex-wrap'>
-									<div>
-										<p className='text-lg font-bold text-[#0d355b]'>Mon CV</p>
-										<p className='mt-1 text-sm text-[#4f7191]'>
-											{activeCvMeta?.source === 'uploaded' ? 'CV uploadé' : activeCvMeta?.source === 'generated' ? 'CV généré' : 'CV'}
-											{activeCvMeta?._id ? ' · Historique activé' : ''}
-										</p>
-									</div>
-									<div className='flex items-center gap-2'>
-										{cvUrl ? (
-											<a
-												href={cvUrl}
-												target='_blank'
-												rel='noreferrer'
-												className='rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50'
-											>
-												Ouvrir dans un nouvel onglet
-											</a>
-										) : null}
-										<button
-											type='button'
-											onClick={() => setSelectedView('offres')}
-											className='rounded-xl bg-[#001d3e] px-4 py-2 text-xs font-semibold text-white transition hover:opacity-95'
-										>
-											← Retour aux offres
-										</button>
-									</div>
-								</div>
-
-								{cvLoading || cvHistoryLoading ? (
-									<div className='mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700'>Chargement…</div>
-								) : null}
-								{cvHistoryError ? (
-									<div className='mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{cvHistoryError}</div>
-								) : null}
-								{cvError ? (
-									<div className='mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{cvError}</div>
-								) : null}
-
-								{cvHistory.length > 0 ? (
-									<div className='mt-5 grid gap-4 lg:grid-cols-[320px_1fr]'>
-										<div className='rounded-2xl border border-slate-200 bg-white p-4'>
-											<div className='flex items-center justify-between gap-2'>
-												<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>HISTORIQUE</p>
-												<Badge variant='slate'>{cvHistory.length}</Badge>
-											</div>
-											<div className='mt-3 max-h-[70vh] space-y-2 overflow-y-auto pr-1'>
-												{cvHistory.map((item) => {
-													const id = String(item?._id || '')
-													const isSelected = id && id === String(selectedCvId)
-													const createdAt = item?.createdAt ? new Date(item.createdAt) : null
-													const label = item?.source === 'uploaded' ? 'Upload' : item?.source === 'generated' ? 'Généré' : 'CV'
-													return (
-														<button
-															key={id}
-															type='button'
-															onClick={() => {
-																setSelectedCvId(id)
-																setCvSource(item?.source || '')
-																setCvError('')
-																const path = item?.filePath || ''
-																setCvUrl(path ? `${API_ORIGIN}${path}` : '')
-																if (!path) setCvError('CV introuvable (fichier manquant).')
-															}}
-															className={`w-full rounded-2xl border px-3 py-2 text-left transition ${isSelected ? 'border-cyan-200 bg-cyan-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
-														>
-															<div className='flex items-start justify-between gap-2'>
-																<div>
-																	<p className='text-sm font-black text-[#103b62]'>{label}</p>
-																	<p className='mt-0.5 text-xs font-semibold text-slate-500'>
-																		{createdAt ? createdAt.toLocaleString() : '—'}
-																	</p>
-																</div>
-																<div className='flex items-center gap-2'>
-																	{item?.isActive ? <Badge variant='emerald'>Actif</Badge> : null}
-																</div>
-															</div>
-														</button>
-													)
-												})}
-											</div>
-
-											<div className='mt-4 flex items-center justify-between gap-2'>
-												<div className='text-xs font-semibold text-slate-500'>
-													{selectedCvMeta?.isActive ? 'Ce CV est utilisé pour postuler.' : 'Vous pouvez choisir ce CV pour postuler.'}
-												</div>
-												<button
-													type='button'
-													onClick={() => selectedCvId && handleSetActiveCv(selectedCvId)}
-													disabled={!selectedCvId || Boolean(selectedCvMeta?.isActive)}
-													className={`rounded-xl px-4 py-2 text-xs font-semibold text-white transition ${!selectedCvId || selectedCvMeta?.isActive ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
-												>
-													Utiliser pour postuler
-												</button>
-											</div>
-										</div>
-
-										<div className='overflow-hidden rounded-2xl border border-slate-200 bg-white'>
-											<div className='border-b border-slate-200 px-5 py-4 text-sm font-bold text-slate-700'>Aperçu</div>
-											{cvUrl ? (
-												<iframe title='Mon CV' src={cvUrl} className='w-full bg-white' style={{ height: '88vh' }} />
-											) : (
-												<div className='p-5 text-sm font-semibold text-slate-600'>Aperçu indisponible.</div>
-											)}
-										</div>
-									</div>
-								) : !cvHistoryLoading && !cvHistoryError ? (
-									<div className='mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700'>
-										Aucun CV trouvé. Uploadez un CV ou générez-en un.
-									</div>
-								) : null}
-							</div>
+							<DashboardCandCvView
+								activeCvMeta={activeCvMeta}
+								cvUrl={cvUrl}
+								setSelectedView={setSelectedView}
+								cvLoading={cvLoading}
+								cvHistoryLoading={cvHistoryLoading}
+								cvHistoryError={cvHistoryError}
+								cvError={cvError}
+								cvHistory={cvHistory}
+								selectedCvId={selectedCvId}
+								setSelectedCvId={setSelectedCvId}
+								setCvSource={setCvSource}
+								setCvError={setCvError}
+								setCvUrl={setCvUrl}
+								selectedCvMeta={selectedCvMeta}
+								handleSetActiveCv={handleSetActiveCv}
+								apiOrigin={API_ORIGIN}
+							/>
 						) : selectedView === 'suggestions' ? (
-							<div className='suggestions-shell mt-8 rounded-2xl border p-5'>
-								<div className='flex flex-wrap items-start justify-between gap-3'>
-									<div>
-										<p className='suggestions-title text-lg font-bold'>Suggestions</p>
-										<p className='suggestions-subtitle mt-1 text-sm'>Analyse de votre CV et recommandations selon le marché (ATS, mots-clés, structure).</p>
-									</div>
-									<div className='flex items-center gap-2'>
-										<button
-											type='button'
-											onClick={() => setSelectedView('cv')}
-											className='suggestions-action-secondary rounded-xl border px-4 py-2 text-xs font-semibold transition'
-										>
-											Voir mon CV
-										</button>
-										<button
-											type='button'
-											onClick={handleAnalyzeCv}
-											disabled={suggestionsLoading || !(candidate?.id || candidate?._id)}
-											className={`suggestions-action-primary rounded-xl px-4 py-2 text-xs font-semibold text-white transition ${suggestionsLoading ? 'opacity-60' : 'hover:-translate-y-[1px]'}`}
-										>
-											{suggestionsLoading ? 'Analyse…' : 'Analyser mon CV'}
-										</button>
-									</div>
-								</div>
-
-								{suggestionsError ? (
-									<div className='mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>
-										<div>{suggestionsError}</div>
-										{suggestionsHint ? <div className='mt-2 text-xs font-semibold text-rose-700'>{suggestionsHint}</div> : null}
-									</div>
-								) : null}
-
-								{suggestionsData ? (
-									<div className='mt-5 space-y-4'>
-										<div className='suggestions-fade-up grid gap-4 sm:grid-cols-3'>
-											<div className='suggestions-metric-card rounded-2xl border p-4'>
-												<p className='suggestions-metric-label text-xs font-bold uppercase tracking-wide'>Points forts</p>
-												<p className='suggestions-metric-value mt-1 text-3xl font-black'>{normalizedSuggestions.strengths.length}</p>
-											</div>
-											<div className='suggestions-metric-card rounded-2xl border p-4'>
-												<p className='suggestions-metric-label text-xs font-bold uppercase tracking-wide'>Catégories</p>
-												<p className='suggestions-metric-value mt-1 text-3xl font-black'>{Object.keys(normalizedSuggestions.recommendationsByCategory).length}</p>
-											</div>
-											<div className='suggestions-metric-card suggestions-metric-card--accent rounded-2xl border p-4'>
-												<p className='suggestions-metric-label text-xs font-bold uppercase tracking-wide'>Rôle détecté</p>
-												<p className='mt-1 text-base font-black text-white'>{normalizedSuggestions.detectedRole || 'Non déterminé'}</p>
-											</div>
-										</div>
-
-										<div className='grid gap-4 xl:grid-cols-[0.92fr_1.28fr]'>
-											<div className='space-y-4'>
-												<div className='suggestions-panel suggestions-fade-up rounded-2xl border p-4'>
-													<p className='suggestions-panel-title text-xs font-black tracking-[0.12em]'>SYNTHÈSE</p>
-													<p className='suggestions-panel-hint mt-2 text-xs font-semibold'>Lecture rapide des points forts de votre CV.</p>
-													{normalizedSuggestions.strengths.length > 0 ? (
-														<ul className='suggestions-body-text mt-3 list-disc space-y-1 pl-5 text-sm'>
-															{normalizedSuggestions.strengths.map((point, idx) => (
-																<li key={`strength-${idx}`}>{point}</li>
-															))}
-														</ul>
-													) : (
-														<p className='suggestions-body-text mt-2 text-sm leading-7'>{normalizedSuggestions.summary || '—'}</p>
-													)}
-													{normalizedSuggestions.summary && normalizedSuggestions.strengths.length > 0 ? (
-														<div className='suggestions-summary-box mt-4 rounded-xl border px-3 py-2 text-sm'>
-															<p className='suggestions-panel-title text-xs font-black tracking-[0.12em]'>Résumé global</p>
-															<p className='mt-2 leading-7'>{normalizedSuggestions.summary}</p>
-														</div>
-													) : null}
-												</div>
-
-												<div className='suggestions-panel suggestions-fade-up rounded-2xl border p-4'>
-													<p className='suggestions-panel-title text-xs font-black tracking-[0.12em]'>PROFIL</p>
-													<div className='mt-3 flex flex-wrap gap-2'>
-														{normalizedSuggestions.detectedRole ? <Badge variant='cyan'>{normalizedSuggestions.detectedRole}</Badge> : null}
-														{normalizedSuggestions.detectedLanguage ? <Badge variant='slate'>{normalizedSuggestions.detectedLanguage}</Badge> : null}
-														<Badge variant='blue'>{Object.keys(normalizedSuggestions.recommendationsByCategory).length} catégories</Badge>
-													</div>
-												</div>
-											</div>
-
-											<div className='suggestions-reco-panel suggestions-fade-up rounded-2xl border p-4'>
-												<div className='flex items-center justify-between gap-3'>
-													<p className='suggestions-panel-title text-xs font-black tracking-[0.12em]'>RECOMMANDATIONS</p>
-													<p className='suggestions-panel-hint text-xs font-semibold'>Par catégories</p>
-												</div>
-												<p className='suggestions-panel-hint mt-2 text-xs font-semibold'>Améliorations actionnables, organisées de façon claire.</p>
-												<div className='suggestions-reco-scroll mt-4 space-y-3'>
-													{Object.keys(normalizedSuggestions.recommendationsByCategory).length > 0 ? (
-														Object.entries(normalizedSuggestions.recommendationsByCategory).map(([category, items]) => (
-															<div key={category} className='suggestions-category-card rounded-2xl border p-4'>
-																<p className='suggestions-category-title text-sm font-black'>{category}</p>
-																<div className='mt-3 space-y-3'>
-																	{(items || []).map((s, idx) => {
-																		const title = s?.title || s?.label || 'Suggestion'
-																		const missing = s?.missing || s?.why || ''
-																		const recommendation = s?.recommendation || s?.example || ''
-																		const priority = s?.priority
-																		return (
-																			<div key={`${category}-${title}-${idx}`} className='suggestions-item-card rounded-xl border p-4'>
-																				<div className='flex items-start justify-between gap-3'>
-																					<p className='suggestions-item-title text-sm font-black'>{title}</p>
-																					{priority ? <Badge variant={priority === 'high' ? 'amber' : priority === 'low' ? 'slate' : 'blue'}>{priority}</Badge> : null}
-																				</div>
-																				{missing ? (
-																					<p className='suggestions-item-text mt-2 text-sm'>
-																						<span className='suggestions-item-title font-bold'>Manque / problème:</span> {missing}
-																					</p>
-																				) : null}
-																				{recommendation ? (
-																					<div className='suggestions-item-callout mt-3 rounded-xl border px-3 py-2 text-sm'>
-																						<span className='suggestions-item-title font-bold'>Recommandation:</span> {recommendation}
-																					</div>
-																				) : null}
-																			</div>
-																		)
-																	})}
-																</div>
-															</div>
-														))
-													) : (
-														<p className='suggestions-empty-text text-sm font-semibold'>Aucune suggestion disponible.</p>
-													)}
-												</div>
-											</div>
-										</div>
-									</div>
-								) : (
-									<div className='mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700'>
-										Cliquez sur “Analyser mon CV” pour obtenir des suggestions.
-									</div>
-								)}
-							</div>
+							<DashboardCandSuggestionsView
+								setSelectedView={setSelectedView}
+								handleAnalyzeCv={handleAnalyzeCv}
+								suggestionsLoading={suggestionsLoading}
+								candidate={candidate}
+								suggestionsError={suggestionsError}
+								suggestionsHint={suggestionsHint}
+								suggestionsData={suggestionsData}
+								normalizedSuggestions={normalizedSuggestions}
+							/>
 						) : selectedView === 'notifications' ? (
-							<div className='mt-8 rounded-2xl border border-[#9fc3e1] bg-gradient-to-br from-[#f7fbff] via-[#edf6ff] to-[#deedfb] p-5 ring-1 ring-[#bdd8ef] shadow-[0_14px_34px_rgba(8,51,93,0.13)]'>
-								<div className='flex flex-wrap items-center justify-between gap-3'>
-									<div>
-										<p className='text-lg font-bold text-[#0d355b]'>Notifications</p>
-										<p className='mt-1 text-sm text-[#4f7191]'>Quand un recruteur planifie un rendez-vous, vous le verrez ici.</p>
-									</div>
-									<button
-										type='button'
-										onClick={() => {
-											const candidateId = candidate?.id || candidate?._id
-											fetchNotifications(candidateId)
-										}}
-										className='rounded-xl border border-[#0a7aa2] px-4 py-2 text-sm font-semibold text-[#0a5f88] transition hover:bg-[#ebfaff]'
-									>
-										Rafraîchir
-									</button>
-								</div>
-
-								{notificationsError ? (
-									<div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{notificationsError}</div>
-								) : null}
-
-								{notificationsLoading ? <p className='mt-4 text-sm text-[#4f7191]'>Chargement...</p> : null}
-
-								{!notificationsLoading && notifications.length === 0 ? (
-									<div className='mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700'>Aucune notification.</div>
-								) : null}
-
-								{!notificationsLoading && notifications.length > 0 ? (
-									<div className='mt-5 space-y-3'>
-										{notifications.map((n) => {
-											const createdAt = n?.createdAt ? new Date(n.createdAt) : null
-											const meetingAtRaw = n?.interviewId?.scheduledAt || n?.meetingAt
-											const meetingAt = meetingAtRaw ? new Date(meetingAtRaw) : null
-											const mode = n?.interviewId?.mode || n?.mode || ''
-											const meetingLink = n?.interviewId?.meetingLink || n?.meetingLink || ''
-											const location = n?.interviewId?.location || n?.location || ''
-											const notes = n?.interviewId?.notes || ''
-											const isUnread = !n?.readAt
-											return (
-												<div key={n._id} className={`rounded-2xl border p-4 ${isUnread ? 'border-cyan-200 bg-white' : 'border-slate-200 bg-slate-50'}`}>
-													<div className='flex flex-wrap items-start justify-between gap-3'>
-														<div>
-															<div className='flex items-center gap-2'>
-																<p className='text-sm font-black text-[#103b62]'>{n.title || 'Notification'}</p>
-																{isUnread ? <Badge variant='cyan'>Nouveau</Badge> : <Badge variant='slate'>Lu</Badge>}
-															</div>
-															<p className='mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700'>{n.message || '—'}</p>
-															<div className='mt-3 flex flex-wrap gap-3 text-xs font-semibold text-slate-500'>
-																<span>{createdAt ? createdAt.toLocaleString() : '—'}</span>
-																{meetingAt ? <span>Date: {meetingAt.toLocaleString()}</span> : null}
-																{mode ? <span>Nature: {mode === 'Présentiel' ? 'Présentiel' : 'En ligne'}</span> : null}
-															</div>
-															{mode === 'Présentiel' && location ? (
-																<div className='mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700'>
-																	Lieu: {location}
-																</div>
-															) : null}
-															{mode !== 'Présentiel' && meetingLink ? (
-																<button
-																	type='button'
-																	onClick={() => handleJoinInterview(meetingLink, n?.interviewId?._id || n?.interviewId)}
-																	className='mt-3 inline-block text-xs font-bold text-cyan-700 hover:underline'
-																>
-																	Rejoindre dans AIR
-																</button>
-															) : null}
-															{notes ? (
-																<div className='mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700'>
-																	Description: {notes}
-																</div>
-															) : null}
-														</div>
-														{isUnread ? (
-															<button
-																type='button'
-																onClick={() => markNotificationAsRead(n._id)}
-																className='rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50'
-															>
-																Marquer comme lue
-															</button>
-														) : null}
-													</div>
-											</div>
-											)
-										})}
-									</div>
-								) : null}
-							</div>
+							<DashboardCandNotificationsView
+								candidate={candidate}
+								fetchNotifications={fetchNotifications}
+								notificationsError={notificationsError}
+								notificationsLoading={notificationsLoading}
+								notifications={notifications}
+								markNotificationAsRead={markNotificationAsRead}
+							/>
 						) : selectedView === 'settings' ? (
-							<div className='mt-8 space-y-5'>
-								<div className='rounded-2xl border border-[#9fc3e1] bg-gradient-to-br from-[#f7fbff] via-[#edf6ff] to-[#deedfb] p-5 ring-1 ring-[#bdd8ef] shadow-[0_14px_34px_rgba(8,51,93,0.13)]'>
-									<div className='flex flex-wrap items-center justify-between gap-3'>
-										<div>
-											<p className='text-lg font-bold text-[#0d355b]'>Paramètres</p>
-											<p className='mt-1 text-sm text-[#4f7191]'>Modifie ton profil, ton CV et ton mot de passe.</p>
-										</div>
-										<button
-											type='button'
-											onClick={() => setSelectedView('cv')}
-											className='rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'
-										>
-											Voir mon CV
-										</button>
-									</div>
-								</div>
-
-								<div className='grid gap-5 lg:grid-cols-2'>
-									<div className='rounded-2xl border border-[#b6cfe6] bg-[#f5faff] p-5 shadow-[0_8px_20px_rgba(8,51,93,0.08)]'>
-										<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>PROFIL</p>
-										{settingsError ? (
-											<div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{settingsError}</div>
-										) : null}
-										{settingsMessage ? (
-											<div className='mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800'>{settingsMessage}</div>
-										) : null}
-										{settingsPhotoError ? (
-											<div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{settingsPhotoError}</div>
-										) : null}
-
-										<form className='mt-4 space-y-3' onSubmit={handleSaveProfile}>
-											<div className='rounded-xl border border-slate-200 bg-slate-50/80 p-3'>
-												<p className='mb-2 block text-xs font-bold uppercase tracking-wide text-slate-600'>Photo de profil</p>
-												<div className='flex flex-wrap items-center gap-3'>
-													<div className='h-16 w-16 overflow-hidden rounded-full bg-gradient-to-br from-[#00d4ff] to-[#1f7bff]'>
-														{settingsForm.profileImage ? (
-															<img src={settingsForm.profileImage} alt='Prévisualisation' className='h-full w-full object-cover' />
-														) : (
-															<div className='flex h-full w-full items-center justify-center text-sm font-bold text-white'>{candidateInitials}</div>
-														)}
-													</div>
-													<div className='min-w-[220px] flex-1'>
-														<input id='settings-profile-photo-input' type='file' accept='image/*' onChange={handleSettingsPhotoSelect} className='hidden' />
-														<label htmlFor='settings-profile-photo-input' className='inline-flex cursor-pointer items-center rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-[#0a5f88] transition hover:bg-cyan-100'>
-															Choisir une photo
-														</label>
-														<p className='mt-2 text-[11px] font-semibold text-slate-500'>JPG/PNG/WEBP, max 2MB</p>
-														<div className='mt-2'>
-															<button
-																type='button'
-																onClick={() => updateSettingsField('profileImage', '')}
-																className='rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100'
-															>
-																Supprimer la photo
-															</button>
-														</div>
-													</div>
-												</div>
-											</div>
-
-											<div className='grid gap-3 sm:grid-cols-2'>
-												<div>
-													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Prénom</label>
-													<input
-														value={settingsForm.firstName}
-														onChange={(e) => updateSettingsField('firstName', e.target.value)}
-														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-													/>
-												</div>
-												<div>
-													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Nom</label>
-													<input
-														value={settingsForm.lastName}
-														onChange={(e) => updateSettingsField('lastName', e.target.value)}
-														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-													/>
-												</div>
-											</div>
-
-											<div>
-												<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Email</label>
-												<input
-													type='email'
-													value={settingsForm.email}
-													onChange={(e) => updateSettingsField('email', e.target.value)}
-													className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-												/>
-											</div>
-
-											<div className='grid gap-3 sm:grid-cols-2'>
-												<div>
-													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Pays</label>
-													<select
-														value={selectedCountryValue}
-														onChange={(e) => {
-															const nextValue = e.target.value
-															if (nextValue === SETTINGS_COUNTRY_OTHER) {
-																updateSettingsField('country', SETTINGS_COUNTRY_OTHER)
-																return
-															}
-															updateSettingsField('country', nextValue)
-														}}
-														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-														style={{ fontFamily: COUNTRY_EMOJI_FONT }}
-													>
-														<option value=''>Sélectionnez votre pays</option>
-														{SETTINGS_COUNTRIES.map((item) => (
-															<option key={item.value} value={item.value}>
-																{item.label}
-															</option>
-														))}
-														<option value={SETTINGS_COUNTRY_OTHER}>🌍 Autre (saisie manuelle)</option>
-													</select>
-													{isCustomCountry ? (
-														<input
-															value={settingsForm.country === SETTINGS_COUNTRY_OTHER ? '' : settingsForm.country}
-															onChange={(e) => updateSettingsField('country', e.target.value)}
-															placeholder='Saisissez votre pays'
-															className='mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-														/>
-													) : null}
-												</div>
-												<div>
-													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Date de naissance</label>
-													<input
-														type='date'
-														value={settingsForm.birthDate}
-														onChange={(e) => updateSettingsField('birthDate', e.target.value)}
-														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-													/>
-												</div>
-											</div>
-
-											<div className='grid gap-3 sm:grid-cols-2'>
-												<div>
-													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Titre</label>
-													<input
-														value={settingsForm.professionalTitle}
-														onChange={(e) => updateSettingsField('professionalTitle', e.target.value)}
-														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-													/>
-												</div>
-												<div>
-													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Secteur</label>
-													<input
-														value={settingsForm.sector}
-														onChange={(e) => updateSettingsField('sector', e.target.value)}
-														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-													/>
-												</div>
-											</div>
-
-											<div className='grid gap-3 sm:grid-cols-2'>
-												<div>
-													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Niveau</label>
-													<select
-														value={settingsForm.experienceLevel}
-														onChange={(e) => updateSettingsField('experienceLevel', e.target.value)}
-														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-													>
-														<option value='student'>Étudiant</option>
-														<option value='junior'>Junior</option>
-														<option value='confirmed'>Confirmé</option>
-														<option value='senior'>Senior</option>
-													</select>
-												</div>
-												<div>
-													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Portfolio (optionnel)</label>
-													<input
-														value={settingsForm.portfolioUrl}
-														onChange={(e) => updateSettingsField('portfolioUrl', e.target.value)}
-														placeholder='https://...'
-														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-													/>
-												</div>
-											</div>
-
-											<div className='pt-1'>
-												<button
-													type='submit'
-													disabled={settingsSaving}
-													className={`rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition ${settingsSaving ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
-												>
-													{settingsSaving ? 'Sauvegarde…' : 'Enregistrer'}
-												</button>
-											</div>
-										</form>
-									</div>
-
-									<div className='space-y-5'>
-										<div className='rounded-2xl border border-[#b6cfe6] bg-[#f5faff] p-5 shadow-[0_8px_20px_rgba(8,51,93,0.08)]'>
-											<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CV GÉNÉRÉ</p>
-											<p className='mt-2 text-sm text-slate-600'>Modifiez vos informations puis régénérez un nouveau CV (il sera ajouté à l’historique).</p>
-											<div className='mt-4'>
-												<button
-													type='button'
-													onClick={handleEditActiveGeneratedCv}
-													className='rounded-xl bg-[#001d3e] px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-95'
-												>
-													Modifier et générer un nouveau CV
-												</button>
-											</div>
-										</div>
-										<div className='rounded-2xl border border-[#b6cfe6] bg-[#f5faff] p-5 shadow-[0_8px_20px_rgba(8,51,93,0.08)]'>
-											<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CHANGER DE CV</p>
-											{settingsCvError ? (
-												<div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{settingsCvError}</div>
-											) : null}
-											{settingsCvMessage ? (
-												<div className='mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800'>{settingsCvMessage}</div>
-											) : null}
-											<div className='mt-4'>
-												<input id='settings-cv-input' type='file' accept='application/pdf,text/html' onChange={(e) => setSettingsCvFile(e.target.files?.[0] || null)} className='hidden' />
-												<label htmlFor='settings-cv-input' className='inline-flex cursor-pointer items-center rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-[#0a5f88] transition hover:bg-cyan-100'>
-													Choisir un CV
-												</label>
-												{!settingsCvFile ? <p className='mt-2 text-[11px] font-semibold text-slate-500'>Aucun fichier choisi</p> : null}
-												{settingsCvFile ? (
-													<div className='mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700'>Fichier: {settingsCvFile.name}</div>
-												) : null}
-											</div>
-											<div className='mt-3'>
-												<button
-													type='button'
-													onClick={handleUploadCvFromSettings}
-													disabled={settingsCvUploading}
-													className={`rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition ${settingsCvUploading ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
-												>
-													{settingsCvUploading ? 'Upload…' : 'Uploader un nouveau CV'}
-												</button>
-											</div>
-										</div>
-
-										<div className='rounded-2xl border border-[#b6cfe6] bg-[#f5faff] p-5 shadow-[0_8px_20px_rgba(8,51,93,0.08)]'>
-											<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>MOT DE PASSE</p>
-											{passwordError ? (
-												<div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{passwordError}</div>
-											) : null}
-											{passwordMessage ? (
-												<div className='mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800'>{passwordMessage}</div>
-											) : null}
-											<form className='mt-4 space-y-3' onSubmit={handleChangePassword}>
-												<div>
-													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Mot de passe actuel</label>
-													<input
-														type='password'
-														value={passwordForm.currentPassword}
-														onChange={(e) => updatePasswordField('currentPassword', e.target.value)}
-														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-													/>
-												</div>
-												<div>
-													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Nouveau mot de passe</label>
-													<input
-														type='password'
-														value={passwordForm.newPassword}
-														onChange={(e) => updatePasswordField('newPassword', e.target.value)}
-														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-													/>
-												</div>
-												<div>
-													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Confirmer</label>
-													<input
-														type='password'
-														value={passwordForm.confirmPassword}
-														onChange={(e) => updatePasswordField('confirmPassword', e.target.value)}
-														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-													/>
-												</div>
-												<div>
-													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Code de verification</label>
-													<div className='grid gap-2 sm:grid-cols-[1fr_auto]'>
-														<input
-															type='text'
-															value={passwordForm.verificationCode}
-															onChange={(e) => updatePasswordField('verificationCode', e.target.value)}
-															className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-															placeholder='Code recu par email'
-														/>
-														<button
-															type='button'
-															onClick={handleRequestPasswordCode}
-															disabled={passwordCodeSending}
-															className='rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs font-semibold text-[#0d355b] hover:bg-blue-100 disabled:opacity-60'
-														>
-															{passwordCodeSending ? 'Envoi...' : 'Envoyer code'}
-														</button>
-													</div>
-												</div>
-												<div className='pt-1'>
-													<button
-														type='submit'
-														disabled={passwordSaving}
-														className={`rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition ${passwordSaving ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
-													>
-														{passwordSaving ? 'Mise à jour…' : 'Changer le mot de passe'}
-													</button>
-												</div>
-											</form>
-										</div>
-
-									</div>
-								</div>
-							</div>
+							<DashboardCandSettingsView
+								setSelectedView={setSelectedView}
+								settingsError={settingsError}
+								settingsMessage={settingsMessage}
+								settingsPhotoError={settingsPhotoError}
+								handleSaveProfile={handleSaveProfile}
+								settingsForm={settingsForm}
+								candidateInitials={candidateInitials}
+								handleSettingsPhotoSelect={handleSettingsPhotoSelect}
+								updateSettingsField={updateSettingsField}
+								selectedCountryValue={selectedCountryValue}
+								isCustomCountry={isCustomCountry}
+								settingsSaving={settingsSaving}
+								handleEditActiveGeneratedCv={handleEditActiveGeneratedCv}
+								settingsCvError={settingsCvError}
+								settingsCvMessage={settingsCvMessage}
+								setSettingsCvFile={setSettingsCvFile}
+								settingsCvFile={settingsCvFile}
+								handleUploadCvFromSettings={handleUploadCvFromSettings}
+								settingsCvUploading={settingsCvUploading}
+								passwordError={passwordError}
+								passwordMessage={passwordMessage}
+								handleChangePassword={handleChangePassword}
+								passwordForm={passwordForm}
+								updatePasswordField={updatePasswordField}
+								passwordSaving={passwordSaving}
+							/>
 						) : selectedView === 'dashboard' ? (
-							<div className='mt-8 rounded-3xl border border-[#d7e9f8] bg-[#fbfdff] p-5 shadow-[0_15px_40px_rgba(8,51,93,0.08)]'>
-								<div className='flex flex-wrap items-center gap-3'>
-									<div>
-										<p className='text-lg font-bold text-[#0d355b]'>Dashboard</p>
-										<p className='mt-1 text-sm text-[#4f7191]'>Statistiques basées sur votre activité (données MongoDB).</p>
-									</div>
-									<span className='ml-auto rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-[11px] font-black text-[#0a5f88]'>Vue analytique</span>
-								</div>
-
-								{dashboardLoading ? <p className='mt-4 text-sm text-[#4f7191]'>Chargement…</p> : null}
-								{!dashboardLoading && dashboardError ? (
-									<div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{dashboardError}</div>
-								) : null}
-
-								{!dashboardLoading && !dashboardError && dashboardStats && (
-									<div className='mt-5 space-y-4'>
-										<div className='grid gap-4 lg:grid-cols-2'>
-											<div className='rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#f0fbff] to-[#dff7ff] p-4'>
-												<div className='flex items-center justify-between gap-2'>
-													<p className='text-[11px] font-black tracking-[0.12em] text-[#0d355b]'>ACTIVITÉ (30J)</p>
-													<span className='rounded-full border border-cyan-200 bg-white px-2 py-1 text-[10px] font-black text-cyan-700'>En ligne</span>
-												</div>
-
-												<div className='mt-4 space-y-3'>
-													<div>
-														<div className='flex items-center justify-between text-xs font-semibold text-slate-600'>
-															<span>TEMPS CONNECTÉ</span>
-															<span className='text-[#0d355b]'>{pipelineStats.connectedHours} h</span>
-														</div>
-														<div className='mt-1 h-2 rounded-full bg-cyan-100'>
-															<div className='h-full rounded-full bg-[#0a5f88]' style={{ width: `${pipelineStats.activityHoursProgress}%` }} />
-														</div>
-													</div>
-													<div>
-														<div className='flex items-center justify-between text-xs font-semibold text-slate-600'>
-															<span>NOMBRE DE CONNEXIONS</span>
-															<span className='text-[#0d355b]'>{pipelineStats.sessionsCount}</span>
-														</div>
-														<div className='mt-1 h-2 rounded-full bg-cyan-100'>
-															<div className='h-full rounded-full bg-[#06d5e0]' style={{ width: `${pipelineStats.activitySessionsProgress}%` }} />
-														</div>
-													</div>
-													<div className='rounded-xl border border-cyan-100 bg-white px-3 py-3'>
-														<div className='mb-2 flex items-center justify-between'>
-															<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>HEURES FRÉQUENTES</p>
-															<span className='text-[11px] font-semibold text-[#0a5f88]'>{pipelineStats.topHourLabel}</span>
-														</div>
-														{pipelineStats.topHoursPipeline.length === 0 ? (
-															<p className='text-xs font-semibold text-slate-500'>Aucune donnée de connexion.</p>
-														) : (
-															<div className='space-y-2'>
-																{pipelineStats.topHoursPipeline.map((h) => (
-																	<div key={h.label}>
-																		<div className='flex items-center justify-between text-[11px] font-semibold text-slate-600'>
-																			<span>{h.label}</span>
-																			<span className='text-[#0d355b]'>{h.count}</span>
-																		</div>
-																		<div className='mt-1 h-2 rounded-full bg-cyan-100'>
-																			<div className='h-full rounded-full bg-gradient-to-r from-[#06d5e0] to-[#0a5f88]' style={{ width: `${h.progress}%` }} />
-																		</div>
-																	</div>
-																))}
-															</div>
-														)}
-													</div>
-												</div>
-											</div>
-
-											<div className='rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#edf4ff] to-[#dfeeff] p-4'>
-												<div className='flex items-center justify-between gap-2'>
-													<p className='text-[11px] font-black tracking-[0.12em] text-[#0d355b]'>PIPELINE CANDIDATURE</p>
-													<span className='rounded-full border border-blue-200 bg-white px-2 py-1 text-[10px] font-black text-[#0a5f88]'>Taux entretien {pipelineStats.interviewRate}%</span>
-												</div>
-
-												<div className='mt-4 space-y-3'>
-													<div>
-														<div className='flex items-center justify-between text-xs font-semibold text-slate-600'>
-															<span>OFFRES POSTULÉES</span>
-															<span className='text-[#0d355b]'>{pipelineStats.appliedCount}</span>
-														</div>
-														<div className='mt-1 h-2 rounded-full bg-blue-100'>
-															<div className='h-full rounded-full bg-[#0f2742]' style={{ width: `${pipelineStats.appliedProgress}%` }} />
-														</div>
-													</div>
-													<div>
-														<div className='flex items-center justify-between text-xs font-semibold text-slate-600'>
-															<span>ENTRETIENS</span>
-															<span className='text-[#0d355b]'>{pipelineStats.interviewsCount}</span>
-														</div>
-														<div className='mt-1 h-2 rounded-full bg-blue-100'>
-															<div className='h-full rounded-full bg-[#06d5e0]' style={{ width: `${pipelineStats.interviewsProgress}%` }} />
-														</div>
-													</div>
-													<div>
-														<div className='flex items-center justify-between text-xs font-semibold text-slate-600'>
-															<span>POSTULÉ + ENTRETIEN</span>
-															<span className='text-[#0d355b]'>{pipelineStats.appliedWithInterviewCount}</span>
-														</div>
-														<div className='mt-1 h-2 rounded-full bg-blue-100'>
-															<div className='h-full rounded-full bg-[#0a5f88]' style={{ width: `${pipelineStats.conversionProgress}%` }} />
-														</div>
-													</div>
-												</div>
-												<p className='mt-3 text-xs font-semibold text-slate-500'>Conversion finale: {pipelineStats.conversionRate}%</p>
-											</div>
-										</div>
-
-										<div className='grid gap-4 lg:grid-cols-3'>
-											<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4 lg:col-span-2'>
-												<div className='flex flex-wrap items-end justify-between gap-2'>
-													<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>COURBE: HEURES CONNECTÉES / JOUR</p>
-													<p className='text-xs font-semibold text-slate-500'>30 derniers jours</p>
-												</div>
-												<div className='mt-3'>
-													<LineAreaChart data={dashboardSeries} />
-												</div>
-											</div>
-											<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
-												<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>RÉPARTITION</p>
-												<div className='mt-3 flex items-center justify-center'>
-													<DonutChart
-														segments={[
-															{ label: 'Candidatures', value: dashboardStats?.offers?.appliedCount ?? 0, color: '#001d3e' },
-															{ label: 'Entretiens', value: dashboardStats?.offers?.interviewsCount ?? 0, color: '#06d5e0' },
-															{ label: 'Postulé+Entretien', value: dashboardStats?.offers?.appliedWithInterviewCount ?? 0, color: '#0a5f88' },
-														]}
-													/>
-												</div>
-												<div className='mt-3 space-y-1 text-xs font-semibold text-slate-600'>
-													<div className='flex items-center justify-between gap-2'>
-														<span className='inline-flex items-center gap-2'>
-																<span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: '#001d3e' }} />
-																Candidatures
-															</span>
-															<span>{dashboardStats?.offers?.appliedCount ?? 0}</span>
-													</div>
-													<div className='flex items-center justify-between gap-2'>
-														<span className='inline-flex items-center gap-2'>
-																<span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: '#06d5e0' }} />
-																Entretiens
-															</span>
-															<span>{dashboardStats?.offers?.interviewsCount ?? 0}</span>
-													</div>
-													<div className='flex items-center justify-between gap-2'>
-														<span className='inline-flex items-center gap-2'>
-																<span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: '#0a5f88' }} />
-																Postulé + entretien
-															</span>
-															<span>{dashboardStats?.offers?.appliedWithInterviewCount ?? 0}</span>
-													</div>
-												</div>
-											</div>
-										</div>
-
-										<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
-											<div className='flex flex-wrap items-end justify-between gap-2'>
-												<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>HISTOGRAMME: HEURES DE CONNEXION</p>
-												<p className='text-xs font-semibold text-slate-500'>Nombre de connexions par heure</p>
-											</div>
-											<div className='mt-3'>
-												<BarChart values={dashboardLoginHours.values} labels={dashboardLoginHours.labels} />
-											</div>
-										</div>
-
-										<div className='grid gap-4 lg:grid-cols-2'>
-											<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
-												<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>DERNIÈRES CANDIDATURES</p>
-												{(dashboardStats?.offers?.recentApplied || []).length === 0 ? (
-													<p className='mt-3 text-sm text-slate-600'>Aucune candidature.</p>
-												) : (
-													<div className='mt-3 space-y-2'>
-														{dashboardStats.offers.recentApplied.map((a) => (
-															<div key={a.candidacyId} className='rounded-xl border border-slate-200 bg-slate-50 px-3 py-2'>
-																<p className='text-sm font-semibold text-slate-800'>{a.title}</p>
-																<p className='text-xs font-semibold text-slate-500'>{a.location || '—'}</p>
-															</div>
-														))}
-													</div>
-												)}
-											</div>
-											<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
-												<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>PROCHAINS ENTRETIENS</p>
-												<div className='mt-3 rounded-xl border border-cyan-100 bg-gradient-to-br from-cyan-50/70 to-white p-3'>
-													<div className='mb-3 flex items-center justify-between'>
-														<button
-															type='button'
-															onClick={() => setInterviewCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
-															className='rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-50'
-														>
-															←
-														</button>
-														<p className='text-sm font-bold capitalize text-[#0d355b]'>{interviewCalendarData.monthLabel}</p>
-														<button
-															type='button'
-															onClick={() => setInterviewCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
-															className='rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-50'
-														>
-															→
-														</button>
-													</div>
-
-													<div className='grid grid-cols-7 gap-1'>
-														{interviewCalendarData.weekDays.map((d) => (
-															<div key={d} className='pb-1 text-center text-[10px] font-black tracking-[0.08em] text-slate-500'>
-																{d}
-															</div>
-														))}
-
-														{interviewCalendarData.cells.map((cell) => {
-															if (cell?.empty) return <div key={cell.key} className='h-9 rounded-md bg-transparent' />
-															const hasEvents = cell.events.length > 0
-															return (
-																<div key={cell.key} className='group relative'>
-																	<div
-																		title={hasEvents ? cell.title : ''}
-																		className={`flex h-9 items-center justify-center rounded-md text-xs font-semibold ${hasEvents ? 'cursor-pointer border border-cyan-200 bg-cyan-100 text-[#0d355b]' : 'border border-slate-100 bg-white text-slate-500'}`}
-																	>
-																		{cell.day}
-																	</div>
-																	{hasEvents ? (
-																		<div className='pointer-events-none absolute left-1/2 top-full z-20 mt-1 w-max max-w-[210px] -translate-x-1/2 rounded-lg bg-[#0f2742] px-2 py-1 text-[10px] font-semibold text-white opacity-0 shadow-lg transition group-hover:opacity-100'>
-																			{cell.title}
-																		</div>
-																	) : null}
-																</div>
-															)
-														})}
-													</div>
-												</div>
-												{(dashboardStats?.offers?.upcomingInterviews || []).length === 0 ? (
-													<p className='mt-3 text-sm text-slate-600'>Aucun entretien à venir.</p>
-												) : null}
-											</div>
-										</div>
-									</div>
-								)}
-							</div>
+							<DashboardCandAnalyticsView
+								dashboardLoading={dashboardLoading}
+								dashboardError={dashboardError}
+								dashboardStats={dashboardStats}
+								pipelineStats={pipelineStats}
+								dashboardSeries={dashboardSeries}
+								dashboardLoginHours={dashboardLoginHours}
+								interviewCalendarData={interviewCalendarData}
+								setInterviewCalendarMonth={setInterviewCalendarMonth}
+							/>
 						) : selectedView === 'offerHelp' ? (
-							<div className='mt-8 rounded-2xl border border-[#9fc3e1] bg-gradient-to-br from-[#f7fbff] via-[#edf6ff] to-[#deedfb] p-5 ring-1 ring-[#bdd8ef] shadow-[0_14px_34px_rgba(8,51,93,0.13)]'>
-								<div className='flex flex-wrap items-start justify-between gap-3'>
-									<div>
-										<p className='text-lg font-bold text-[#0d355b]'>Aide pour une offre</p>
-										<p className='mt-1 text-sm text-[#4f7191]'>Sélectionne une offre, puis reçois des conseils et une préparation à l’entretien.</p>
-									</div>
-									<div className='flex items-center gap-2'>
-										{selectedJob ? (
-											<button
-												type='button'
-												onClick={() =>
-													sendOfferHelpMessage(
-														`Je postule à l’offre “${selectedJob.title}”. Donne-moi des conseils concrets pour adapter mon CV et mon message de candidature. Ensuite liste les mots-clés/compétences à mettre en avant.`
-													)
-												}
-												disabled={offerHelpLoading}
-												className={`rounded-xl px-4 py-2 text-xs font-semibold text-white shadow-sm transition ${offerHelpLoading ? 'bg-slate-300' : 'bg-gradient-to-r from-[#0b3c72] to-[#0a5f88] hover:brightness-110'}`}
-											>
-												Conseils candidature
-											</button>
-										) : null}
-										{selectedJob ? (
-											<button
-												type='button'
-												onClick={() =>
-													sendOfferHelpMessage(
-														`Prépare-moi à un entretien pour l’offre “${selectedJob.title}”. Je veux: (1) 10 questions probables + bonnes réponses, (2) questions techniques si pertinent, (3) pitch 60 secondes, (4) questions à poser au recruteur.`
-													)
-												}
-												disabled={offerHelpLoading}
-												className={`rounded-xl border border-cyan-200/70 bg-cyan-50 px-4 py-2 text-xs font-semibold text-[#0a5f88] transition hover:bg-cyan-100 ${offerHelpLoading ? 'opacity-60' : ''}`}
-											>
-												Préparation entretien
-											</button>
-										) : null}
-										<button
-											type='button'
-											onClick={() => {
-												setOfferHelpChatId(null)
-												setOfferHelpMessages([
-													{ role: 'assistant', content: "Bonjour. Sélectionne une offre puis je t’aide à adapter ta candidature et te préparer à l’entretien." },
-												])
-												setOfferHelpError('')
-											}}
-											className='rounded-xl border border-slate-200 bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200'
-										>
-											Réinitialiser
-										</button>
-									</div>
-								</div>
-
-								{offerHelpError ? (
-									<div className='mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{offerHelpError}</div>
-								) : null}
-
-								<div className='mt-5 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]'>
-									<div className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
-										<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CONVERSATION</p>
-										<div className='mt-3 max-h-[56vh] space-y-3 overflow-y-auto pr-1'>
-											{offerHelpMessages.map((m, idx) => (
-												<div key={`offer-help-msg-${idx}`} className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-													{m.role === 'assistant' ? (
-														<div className='mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#0b2f57] to-[#134a84] text-[11px] font-black text-white shadow-sm'>AI</div>
-													) : null}
-													<div className={`max-w-[85%] rounded-2xl border px-4 py-3 shadow-sm ${m.role === 'user' ? 'border-[#8ee8ff] bg-gradient-to-br from-[#ddf7ff] to-[#f2fdff]' : 'border-[#d6e6f5] bg-gradient-to-br from-white to-[#f7fbff]'}`}>
-														<p className='text-[11px] font-black tracking-[0.1em] text-[#5b7590]'>{m.role === 'user' ? candidateName : 'ASSISTANT IA'}</p>
-														<p className='mt-1 whitespace-pre-wrap text-sm leading-7 text-[#173c62]'>{m.content}</p>
-													</div>
-													{m.role === 'user' ? (
-														<div className='mt-1 h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-[#00bfe7] to-[#1b6fe0] shadow-sm'>
-															{candidate?.profileImage ? (
-																<img src={candidate.profileImage} alt='Compte' className='h-full w-full object-cover' />
-															) : (
-																<div className='flex h-full w-full items-center justify-center text-[11px] font-bold text-white'>{candidateInitials}</div>
-															)}
-														</div>
-													) : null}
-												</div>
-											))}
-										</div>
-
-										<div className='mt-4 flex flex-col gap-3 rounded-2xl border border-[#d6e6f5] bg-white/85 p-3 md:flex-row md:items-end'>
-											<div className='flex-1'>
-												<textarea
-													rows={3}
-													value={offerHelpInput}
-													onChange={(e) => setOfferHelpInput(e.target.value)}
-													placeholder='Ex: adapte mon CV à cette offre et prépare-moi à l’entretien…'
-													className='w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-cyan-300'
-												/>
-											</div>
-											<div className='flex items-center gap-3'>
-												<div className='text-xs font-semibold text-[#6683a0]'>{offerHelpLoading ? 'En cours…' : selectedJob ? `Offre: ${selectedJob.title}` : 'Aucune offre sélectionnée'}</div>
-												<button
-													type='button'
-													onClick={handleOfferHelpSend}
-													disabled={offerHelpLoading || !offerHelpInput.trim()}
-													className={`rounded-xl px-4 py-2 text-xs font-semibold text-white shadow-sm transition ${offerHelpLoading || !offerHelpInput.trim() ? 'bg-slate-300' : 'bg-gradient-to-r from-[#0fa7d6] to-[#1b6fe0] hover:brightness-110'}`}
-												>
-													Envoyer
-												</button>
-											</div>
-										</div>
-									</div>
-
-									<div className='rounded-2xl border border-slate-200 bg-white p-4'>
-										<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CONTEXTE (OPTIONNEL)</p>
-										<p className='mt-2 text-xs font-semibold text-slate-600'>Ajoute l’offre (texte) et/ou ton CV pour une réponse plus précise.</p>
-										<div className='mt-3 space-y-3'>
-											<div className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
-												<p className='text-xs font-black tracking-[0.12em] text-slate-600'>OFFRES D’EMPLOI</p>
-												<p className='mt-2 text-xs font-semibold text-slate-600'>Sélectionne une offre pour lier le chat.</p>
-												<div className='mt-3 max-h-[24vh] space-y-2 overflow-y-auto pr-1'>
-													{jobs.length ? (
-														jobs.map((j) => (
-															<button
-																type='button'
-																key={j.id}
-																onClick={() => setSelectedJobId(j.id)}
-																className={`w-full rounded-xl border px-3 py-2 text-left text-xs font-semibold transition ${selectedJob?.id === j.id ? 'border-cyan-200 bg-white text-slate-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
-															>
-																<div className='text-sm font-black text-[#103b62]'>{j.title}</div>
-																<div className='mt-1 text-xs text-slate-500'>{j.location ? `${j.location} · ` : ''}{j.contractType || j.type || ''}</div>
-															</button>
-														))
-													) : (
-														<div className='rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600'>Aucune offre disponible.</div>
-													)}
-												</div>
-											</div>
-											<div>
-												<p className='text-xs font-bold text-slate-700'>Offre d’emploi (texte)</p>
-												<textarea
-													rows={7}
-													value={offerHelpOfferText}
-													onChange={(e) => setOfferHelpOfferText(e.target.value)}
-													placeholder='Colle ici la description de l’offre (missions, compétences, exigences)…'
-													className='mt-2 w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300'
-												/>
-											</div>
-											<div>
-												<p className='text-xs font-bold text-slate-700'>CV en PDF (optionnel)</p>
-												<input id='offerhelp-cv-input' type='file' accept='application/pdf,text/html' onChange={(e) => setOfferHelpFile(e.target.files?.[0] || null)} className='hidden' />
-												<label htmlFor='offerhelp-cv-input' className='mt-2 inline-flex cursor-pointer items-center rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-[#0a5f88] transition hover:bg-cyan-100'>
-													Choisir un fichier
-												</label>
-												{!offerHelpFile ? <p className='mt-2 text-[11px] font-semibold text-slate-500'>Aucun fichier choisi</p> : null}
-												{offerHelpFile ? (
-													<div className='mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700'>Fichier: {offerHelpFile.name}</div>
-												) : null}
-											</div>
-										</div>
-									</div>
-								</div>
-							</div>
+							<DashboardCandOfferHelpView
+								selectedJob={selectedJob}
+								sendOfferHelpMessage={sendOfferHelpMessage}
+								offerHelpLoading={offerHelpLoading}
+								setOfferHelpChatId={setOfferHelpChatId}
+								setOfferHelpMessages={setOfferHelpMessages}
+								setOfferHelpError={setOfferHelpError}
+								offerHelpError={offerHelpError}
+								offerHelpMessages={offerHelpMessages}
+								candidateName={candidateName}
+								candidate={candidate}
+								candidateInitials={candidateInitials}
+								offerHelpInput={offerHelpInput}
+								setOfferHelpInput={setOfferHelpInput}
+								handleOfferHelpSend={handleOfferHelpSend}
+								jobs={jobs}
+								setSelectedJobId={setSelectedJobId}
+								offerHelpOfferText={offerHelpOfferText}
+								setOfferHelpOfferText={setOfferHelpOfferText}
+								setOfferHelpFile={setOfferHelpFile}
+								offerHelpFile={offerHelpFile}
+							/>
 						) : selectedView === 'assistant' ? (
-							<div className='mt-8 rounded-2xl border border-[#9fc3e1] bg-gradient-to-br from-[#f7fbff] via-[#edf6ff] to-[#deedfb] p-5 ring-1 ring-[#bdd8ef] shadow-[0_14px_34px_rgba(8,51,93,0.13)]'>
-								<div className='flex items-start justify-between gap-3 flex-wrap'>
-									<div>
-										<p className='text-lg font-bold text-[#0d355b]'>Assistant IA</p>
-										<p className='mt-1 text-sm text-[#4f7191]'>Discussion simple entre toi et l’IA. Tu peux joindre ton CV (PDF/HTML).</p>
-									</div>
-									<button
-										type='button'
-										onClick={() => {
-											setAssistantChatId(null)
-											setAssistantMessages([
-												{ role: 'assistant', content: "Bonjour, je suis l’Assistant IA d’A.I.R. Pose-moi tes questions sur ton CV, ta candidature, ou la préparation d’entretien." },
-											])
-											setAssistantError('')
-											setAssistantFile(null)
-										}}
-										className='rounded-xl border border-slate-200 bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200'
-									>
-										Réinitialiser
-									</button>
-								</div>
-
-								{assistantError ? (
-									<div className='mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{assistantError}</div>
-								) : null}
-
-								<div className='mt-5 rounded-2xl border border-[#c9e6ff] bg-gradient-to-br from-[#f7fcff] via-[#eef8ff] to-[#f4fbff] p-4'>
-									<p className='text-xs font-black tracking-[0.12em] text-[#0b2f57]'>CONVERSATION</p>
-									<div className='mt-3 max-h-[62vh] space-y-3 overflow-y-auto pr-1'>
-										{assistantMessages.map((m, idx) => (
-											<div key={`assistant-msg-${idx}`} className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-												{m.role === 'assistant' ? (
-													<div className='mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#0b2f57] to-[#134a84] text-[11px] font-black text-white shadow-sm'>AI</div>
-												) : null}
-												<div className={`max-w-[85%] rounded-2xl border px-4 py-3 shadow-sm ${m.role === 'user' ? 'border-[#8ee8ff] bg-gradient-to-br from-[#ddf7ff] to-[#f2fdff]' : 'border-[#d6e6f5] bg-gradient-to-br from-white to-[#f7fbff]'}`}>
-													<p className='text-[11px] font-black tracking-[0.1em] text-[#5b7590]'>{m.role === 'user' ? candidateName : 'ASSISTANT IA'}</p>
-													<p className='mt-1 whitespace-pre-wrap text-sm leading-7 text-[#173c62]'>{m.content}</p>
-												</div>
-												{m.role === 'user' ? (
-													<div className='mt-1 h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-[#00bfe7] to-[#1b6fe0] shadow-sm'>
-														{candidate?.profileImage ? (
-															<img src={candidate.profileImage} alt='Compte' className='h-full w-full object-cover' />
-														) : (
-															<div className='flex h-full w-full items-center justify-center text-[11px] font-bold text-white'>{candidateInitials}</div>
-														)}
-													</div>
-												) : null}
-											</div>
-										))}
-									</div>
-
-									<div className='mt-4 flex flex-col gap-3 rounded-2xl border border-[#d6e6f5] bg-white/85 p-3 md:flex-row md:items-end'>
-										<div className='flex-1'>
-											<textarea
-												rows={3}
-												value={assistantInput}
-												onChange={(e) => setAssistantInput(e.target.value)}
-												placeholder='Écris ton message à l’assistant…'
-												className='w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-cyan-300'
-											/>
-										</div>
-										<div className='flex flex-col items-start gap-2'>
-											<input id='assistant-cv-input' type='file' accept='application/pdf,text/html' onChange={(e) => setAssistantFile(e.target.files?.[0] || null)} className='hidden' />
-											<label htmlFor='assistant-cv-input' className='inline-flex cursor-pointer items-center rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-[#0a5f88] transition hover:bg-cyan-100'>
-												Choisir un fichier
-											</label>
-											{!assistantFile ? <div className='text-[11px] font-semibold text-slate-500'>Aucun fichier choisi</div> : null}
-											{assistantFile ? <div className='text-xs font-semibold text-slate-600'>Fichier: {assistantFile.name}</div> : null}
-										</div>
-										<button
-											type='button'
-											onClick={handleAssistantSend}
-											disabled={assistantLoading || !assistantInput.trim()}
-											className={`rounded-xl px-4 py-2 text-xs font-semibold text-white shadow-sm transition ${assistantLoading || !assistantInput.trim() ? 'bg-slate-300' : 'bg-gradient-to-r from-[#0fa7d6] to-[#1b6fe0] hover:brightness-110'}`}
-										>
-											{assistantLoading ? 'En cours…' : 'Envoyer'}
-										</button>
-									</div>
-								</div>
-							</div>
+							<DashboardCandAssistantView
+								setAssistantChatId={setAssistantChatId}
+								setAssistantMessages={setAssistantMessages}
+								setAssistantError={setAssistantError}
+								setAssistantFile={setAssistantFile}
+								assistantError={assistantError}
+								assistantMessages={assistantMessages}
+								candidateName={candidateName}
+								candidate={candidate}
+								candidateInitials={candidateInitials}
+								assistantInput={assistantInput}
+								setAssistantInput={setAssistantInput}
+								assistantLoading={assistantLoading}
+								assistantFile={assistantFile}
+								handleAssistantSend={handleAssistantSend}
+							/>
 						) : selectedView === 'candidatures' ? (
-							<div className='mt-8 rounded-2xl border border-[#9fc3e1] bg-gradient-to-br from-[#f7fbff] via-[#edf6ff] to-[#deedfb] p-5 ring-1 ring-[#bdd8ef] shadow-[0_14px_34px_rgba(8,51,93,0.13)]'>
-								<div className='rounded-2xl border border-[#0f2f57] bg-[#0b2b4f] px-4 py-3 shadow-[0_10px_24px_rgba(7,38,73,0.35)]'>
-									<div className='flex flex-wrap items-center justify-between gap-2'>
-										<p className='text-xl font-black text-white'>Mes candidatures</p>
-										<span className='rounded-full border border-cyan-300/40 bg-cyan-400/10 px-3 py-1 text-xs font-black tracking-[0.08em] text-cyan-100'>
-											{candidacies.length} offre(s)
-										</span>
-									</div>
-									<p className='mt-1 text-sm font-semibold text-cyan-100/90'>Suivi centralisé de vos candidatures et statuts.</p>
-								</div>
-
-								{candidacies.length === 0 ? (
-									<div className='mt-4 rounded-2xl border border-slate-200 bg-white p-5'>
-										<p className='text-sm font-semibold text-slate-700'>Aucune candidature pour le moment.</p>
-										<p className='mt-1 text-xs text-slate-500'>Postulez à une offre pour la voir ici.</p>
-									</div>
-								) : (
-									<div className='mt-4 grid gap-4 lg:grid-cols-2'>
-										{candidacies.map((c) => {
-											const offer = c.jobOfferId
-											const createdAt = c.createdAt ? new Date(c.createdAt) : null
-											const rawStatus = String(c.status || 'En attente').toLowerCase()
-											const statusClass = rawStatus.includes('applied') || rawStatus.includes('postul')
-												? 'border-cyan-200 bg-cyan-50 text-cyan-800'
-												: rawStatus.includes('interview') || rawStatus.includes('entretien')
-													? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-													: rawStatus.includes('reject') || rawStatus.includes('refus')
-														? 'border-rose-200 bg-rose-50 text-rose-800'
-														: 'border-slate-200 bg-slate-50 text-slate-700'
-
-											return (
-												<div key={c._id} className='overflow-hidden rounded-2xl border border-[#b6cfe6] bg-white shadow-[0_8px_20px_rgba(8,51,93,0.08)]'>
-													<div className='h-1.5 bg-gradient-to-r from-[#0b2f57] via-[#0a5f88] to-[#06d5e0]' />
-													<div className='p-4'>
-														<div className='flex items-start justify-between gap-3'>
-															<p className='text-2xl font-bold leading-tight text-[#0d355b]'>{offer?.title || 'Offre'}</p>
-															<span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${statusClass}`}>{c.status || 'En attente'}</span>
-														</div>
-														<p className='mt-2 text-sm font-semibold text-[#4f7191]'>
-															{offer?.location ? `${offer.location} · ` : ''}{offer?.contractType || '—'}
-														</p>
-														<div className='mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700'>
-															Postulé le: <span className='font-bold text-[#0d355b]'>{createdAt ? createdAt.toLocaleDateString() : '—'}</span>
-														</div>
-															{Number.isFinite(c?.quizScore) ? (
-																<p className='mt-2 text-sm text-slate-600'>Score quiz: {c.quizScore}%</p>
-															) : null}
-													</div>
-												</div>
-											)
-										})}
-									</div>
-								)}
-							</div>
+							<DashboardCandCandidaturesView candidacies={candidacies} />
 						) : (
 							<div className='mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-5'>
 								<p className='text-lg font-bold text-[#0d355b]'>Section bientôt disponible</p>
@@ -3677,146 +1518,21 @@ function DashboardCand() {
 				</main>
 			</div>
 
-			{quizOpen ? (
-				<div className='fixed inset-0 z-50 flex items-center justify-center bg-[#00162f]/55 p-4'>
-					<div
-						className='max-h-[88vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_24px_60px_rgba(0,22,47,0.35)] select-none'
-						onCopy={(e) => e.preventDefault()}
-						onCut={(e) => e.preventDefault()}
-						onPaste={(e) => e.preventDefault()}
-						onContextMenu={(e) => e.preventDefault()}
-					>
-						<div className='border-b border-slate-200 bg-gradient-to-r from-[#f0f9ff] via-white to-[#eef6ff] px-5 py-4'>
-							<div className='flex flex-wrap items-start justify-between gap-3'>
-								<div>
-									<p className='text-[11px] font-black uppercase tracking-[0.12em] text-[#5b7f9d]'>Quiz automatique</p>
-									<h3 className='mt-1 text-lg font-black text-[#0d355b]'>{selectedJob?.title || 'Offre'}</h3>
-									<p className='mt-1 text-xs text-[#4f7191]'>Questions generees automatiquement selon le domaine du poste.</p>
-									{quizMeta?.domain ? <p className='mt-1 text-xs text-[#4f7191]'>Domaine detecte: {quizMeta.domain}</p> : null}
-									<p className='mt-1 text-xs font-semibold text-[#0a5f88]'>Mode: {quizModeConfig[quizMode]?.label || '8 questions / 8 min'}</p>
-								</div>
-								<div className='flex items-center gap-2'>
-									<div className={`rounded-full border px-3 py-1 text-xs font-bold ${quizSecondsLeft <= 30 ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-cyan-200 bg-cyan-50 text-cyan-700'}`}>
-										Chrono: {formatQuizSeconds(quizSecondsLeft)}
-									</div>
-									<div className='rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700'>
-										{quizQuestions.length} questions
-									</div>
-								</div>
-							</div>
-						</div>
-
-						<div className='max-h-[60vh] overflow-y-auto px-5 py-4'>
-							<div className='space-y-4'>
-								{quizQuestions.map((q, index) => (
-									<div key={q.id} className='rounded-xl border border-cyan-100 bg-gradient-to-br from-[#f8fdff] via-white to-[#f4fbff] p-4'>
-										<p className='text-sm font-black text-[#103b62]'>
-											Q{index + 1}. {q.question}
-										</p>
-										<div className='mt-3 grid gap-2'>
-											{(q.options || []).map((opt) => {
-												const checked = quizAnswers[q.id] === opt.key
-												return (
-													<label key={`${q.id}-${opt.key}`} className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm ${checked ? 'border-cyan-300 bg-cyan-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
-														<input
-															type='radio'
-															name={`quiz-${q.id}`}
-															checked={checked}
-															onChange={() => handleQuizAnswerChange(q.id, opt.key)}
-															className='mt-1 h-4 w-4'
-														/>
-														<span className='text-slate-700'>{opt.text}</span>
-													</label>
-												)
-											})}
-										</div>
-									</div>
-								))}
-							</div>
-
-							{quizError ? <div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-800'>{quizError}</div> : null}
-						</div>
-
-						<div className='flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-4'>
-							<button
-								type='button'
-								onClick={() => {
-									if (quizSubmitting || isApplying) return
-									setQuizOpen(false)
-									setQuizError('')
-									setQuizSecondsLeft(0)
-									quizTimedOutRef.current = false
-								}}
-								className='rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'
-							>
-								Annuler
-							</button>
-							<button
-								type='button'
-								onClick={() => handleSubmitQuizAndApply()}
-								disabled={quizSubmitting || isApplying || quizSecondsLeft <= 0}
-								className={`rounded-xl px-4 py-2 text-sm font-semibold text-white ${quizSubmitting || isApplying || quizSecondsLeft <= 0 ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
-							>
-								{quizSubmitting ? 'Correction en cours...' : isApplying ? 'Candidature en cours...' : 'Valider le quiz et postuler'}
-							</button>
-						</div>
-					</div>
-				</div>
-			) : null}
-			<div className='fixed bottom-4 left-4 z-40'>
-				<button
-					type='button'
-					onClick={() => setAppFeedbackOpen((prev) => !prev)}
-					aria-label='Ouvrir le feedback AIR'
-					title='Feedback AIR'
-					className='flex h-11 w-11 items-center justify-center rounded-full bg-[#001d3e] text-lg font-black text-white shadow-xl transition hover:opacity-95'
-				>
-					★
-				</button>
-				{appFeedbackOpen ? (
-					<div className='absolute bottom-14 left-0 w-[86vw] max-w-xs rounded-2xl border border-[#b6cfe6] bg-white p-4 shadow-2xl'>
-						<div className='flex items-start justify-between gap-2'>
-							<div>
-								<p className='text-sm font-black text-[#0d355b]'>Votre avis sur AIR</p>
-								<p className='mt-1 text-xs text-slate-600'>Moyenne globale: {appFeedbackSummary.averageRating ? `${appFeedbackSummary.averageRating}/5` : '—'} • {appFeedbackSummary.totalFeedbacks} avis</p>
-							</div>
-							<button type='button' onClick={() => setAppFeedbackOpen(false)} className='rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50'>Fermer</button>
-						</div>
-
-						{appFeedbackError ? <div className='mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700'>{appFeedbackError}</div> : null}
-						{appFeedbackMessage ? <div className='mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700'>{appFeedbackMessage}</div> : null}
-
-						<form className='mt-3 space-y-3' onSubmit={handleSubmitAppFeedback}>
-							<div className='flex items-center gap-2'>
-								{[1, 2, 3, 4, 5].map((star) => (
-									<button
-										key={star}
-										type='button'
-										onClick={() => setAppFeedbackForm((prev) => ({ ...prev, rating: star }))}
-										className={`h-9 w-9 rounded-full border text-base transition ${star <= appFeedbackForm.rating ? 'border-amber-300 bg-amber-100 text-amber-600' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'}`}
-									>
-										★
-									</button>
-								))}
-							</div>
-							<textarea
-								rows={3}
-								value={appFeedbackForm.comment}
-								onChange={(e) => setAppFeedbackForm((prev) => ({ ...prev, comment: e.target.value }))}
-								className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-300'
-								placeholder='Votre commentaire (optionnel)'
-							/>
-							<button
-								type='submit'
-								disabled={appFeedbackSaving}
-								className={`w-full rounded-xl px-4 py-2 text-sm font-semibold text-white transition ${appFeedbackSaving ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
-							>
-								{appFeedbackSaving ? 'Envoi…' : 'Envoyer'}
-							</button>
-						</form>
-					</div>
-				) : null}
-			</div>
+			<DashboardCandQuizModal
+				quizOpen={quizOpen}
+				selectedJob={selectedJob}
+				quizMeta={quizMeta}
+				quizModeLabel={quizModeConfig[quizMode]?.label}
+				quizSecondsLeft={quizSecondsLeft}
+				quizQuestions={quizQuestions}
+				quizAnswers={quizAnswers}
+				handleQuizAnswerChange={handleQuizAnswerChange}
+				quizError={quizError}
+				quizSubmitting={quizSubmitting}
+				isApplying={isApplying}
+				onClose={handleCloseQuizModal}
+				handleSubmitQuizAndApply={handleSubmitQuizAndApply}
+			/>
 		</section>
 	)
 }
