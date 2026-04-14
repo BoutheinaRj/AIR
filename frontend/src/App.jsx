@@ -35,6 +35,7 @@ function App() {
     location.pathname === '/mot-de-passe-oublie'
 
   const contentPadding = isDashboardPage || isAuthPage ? '' : 'px-4 sm:px-[5vw] md:px-[7vw] lg:px-[9vw]'
+  const showChatWidget = isDashboardPage
 
   return (
     <div className='min-h-screen flex flex-col'>
@@ -63,7 +64,7 @@ function App() {
       
     </Routes>
     </main>
-    <ChatWidget />
+    {showChatWidget && <ChatWidget />}
     </div>
 
   )
