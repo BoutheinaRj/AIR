@@ -15,7 +15,7 @@ function InterviewMeet() {
 	const initialName = params.get('name') || ''
 	const [displayName, setDisplayName] = useState(initialName)
 	const [localScore, setLocalScore] = useState(null)
-	const [recruiterSummary, setRecruiterSummary] = useState(null)
+	const [recruiterSummarye , setRecruiterSummary] = useState(null)
 	const [summaryError, setSummaryError] = useState('')
 	const [reportData, setReportData] = useState(null)
 	const [reportLoading, setReportLoading] = useState(false)
