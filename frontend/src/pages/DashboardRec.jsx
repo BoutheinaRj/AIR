@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { assets } from '../assets/assets'
 import { useNavigate } from 'react-router-dom'
+import { jsPDF } from 'jspdf'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const API_ORIGIN = API_BASE.replace(/\/api\/?$/, '')
@@ -65,6 +66,43 @@ const BarChart = ({ values, labels, height = 140 }) => {
 	)
 }
 
+const getQuizReviewSummary = (attempt) => {
+	const safeScore = Number.isFinite(attempt?.scorePercent) ? attempt.scorePercent : 0
+	if (safeScore >= 85) {
+		return {
+			gradeLabel: 'Excellent',
+			feedback: 'Le candidat maitrise bien les notions du poste.',
+			improvement: 'Consolider avec des cas pratiques plus avancés en entretien.',
+		}
+	}
+	if (safeScore >= 65) {
+		return {
+			gradeLabel: 'Bon',
+			feedback: 'Base technique solide avec quelques lacunes ciblées.',
+			improvement: 'Creuser les themes en erreur pendant l entretien technique.',
+		}
+	}
+	if (safeScore >= 45) {
+		return {
+			gradeLabel: 'Moyen',
+			feedback: 'Niveau exploitable mais des fondamentaux sont fragiles.',
+			improvement: 'Prevoir un test pratique court et des questions de validation des bases.',
+		}
+	}
+	return {
+		gradeLabel: 'A renforcer',
+		feedback: 'Le candidat est en difficulte sur plusieurs notions essentielles.',
+		improvement: 'Demander une remise a niveau sur les sujets manques avant suite du process.',
+	}
+}
+
+const getOptionTextByKey = (question, key) => {
+	const normalized = String(key || '').trim().toLowerCase()
+	if (!normalized || normalized === 'none') return 'Aucune reponse'
+	const option = (question?.options || []).find((opt) => String(opt?.key || '').trim().toLowerCase() === normalized)
+	return option?.text || normalized.toUpperCase()
+}
+
 function DashboardRec() {
 	const navigate = useNavigate()
 	const [calendarMonth, setCalendarMonth] = useState(() => {
@@ -108,16 +146,30 @@ function DashboardRec() {
 		currentPassword: '',
 		newPassword: '',
 		confirmPassword: '',
+		verificationCode: '',
 	})
 	const [passwordMessage, setPasswordMessage] = useState('')
 	const [passwordError, setPasswordError] = useState('')
 	const [savingPassword, setSavingPassword] = useState(false)
+	const [sendingPasswordCode, setSendingPasswordCode] = useState(false)
+	const [appFeedbackForm, setAppFeedbackForm] = useState({ rating: 0, comment: '' })
+	const [appFeedbackSaving, setAppFeedbackSaving] = useState(false)
+	const [appFeedbackMessage, setAppFeedbackMessage] = useState('')
+	const [appFeedbackError, setAppFeedbackError] = useState('')
+	const [appFeedbackSummary, setAppFeedbackSummary] = useState({ averageRating: null, totalFeedbacks: 0 })
+	const [appFeedbackOpen, setAppFeedbackOpen] = useState(false)
 	const [candidacies, setCandidacies] = useState([])
 	const [cvByCandidate, setCvByCandidate] = useState({})
 	const [cvDetailsOpenByCandidate, setCvDetailsOpenByCandidate] = useState({})
 	const [cvExtractionByCandidate, setCvExtractionByCandidate] = useState({})
 	const [cvExtractionLoadingByCandidate, setCvExtractionLoadingByCandidate] = useState({})
 	const [cvExtractionErrorByCandidate, setCvExtractionErrorByCandidate] = useState({})
+	const [quizReviewState, setQuizReviewState] = useState({
+		open: false,
+		candidateName: '',
+		offerTitle: '',
+		attempt: null,
+	})
 	const [loadingCandidacies, setLoadingCandidacies] = useState(false)
 	const [candidaciesError, setCandidaciesError] = useState('')
 	const [interviews, setInterviews] = useState([])
@@ -146,6 +198,48 @@ function DashboardRec() {
 		}, 1000)
 		return () => clearInterval(interval)
 	}, [])
+
+	useEffect(() => {
+		const recruiterId = recruiter?.id || recruiter?._id
+		if (!recruiterId) return
+
+		let cancelled = false
+		const fetchAppFeedback = async () => {
+			try {
+				const [mineRes, summaryRes] = await Promise.all([
+					fetch(`${API_BASE}/app-feedback/mine?userId=${encodeURIComponent(recruiterId)}&userRole=recruiter`),
+					fetch(`${API_BASE}/app-feedback/summary`),
+				])
+
+				const mineData = await mineRes.json().catch(() => ({}))
+				const summaryData = await summaryRes.json().catch(() => ({}))
+				if (cancelled) return
+
+				if (mineRes.ok && mineData?.success && mineData?.feedback) {
+					setAppFeedbackForm({
+						rating: Number(mineData.feedback.rating || 0),
+						comment: String(mineData.feedback.comment || ''),
+					})
+				}
+
+				if (summaryRes.ok && summaryData?.success && summaryData?.summary) {
+					setAppFeedbackSummary({
+						averageRating: Number.isFinite(summaryData.summary.averageRating) ? Number(summaryData.summary.averageRating) : null,
+						totalFeedbacks: Number(summaryData.summary.totalFeedbacks || 0),
+					})
+				}
+			} catch {
+				if (!cancelled) {
+					setAppFeedbackSummary((prev) => ({ ...prev }))
+				}
+			}
+		}
+
+		fetchAppFeedback()
+		return () => {
+			cancelled = true
+		}
+	}, [recruiter?.id, recruiter?._id])
 
 	const formattedTime = currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
@@ -580,6 +674,95 @@ function DashboardRec() {
 		}
 	}, [upcomingInterviews])
 
+	const quizReviewComputed = useMemo(() => {
+		const attempt = quizReviewState.attempt
+		if (!attempt) return null
+
+		const summary = getQuizReviewSummary(attempt)
+		const wrongQuestions = (attempt.questions || []).filter((q) => !q?.isCorrect)
+		const weakDomains = Array.from(
+			new Set(
+				wrongQuestions
+					.map((q) => String(q?.domain || '').trim())
+					.filter(Boolean)
+			)
+		)
+
+		return {
+			summary,
+			wrongQuestionsCount: wrongQuestions.length,
+			weakDomains,
+		}
+	}, [quizReviewState.attempt])
+
+	const handleExportQuizReviewPdf = () => {
+		const attempt = quizReviewState.attempt
+		if (!attempt) return
+
+		const summary = getQuizReviewSummary(attempt)
+		const weakDomains = Array.from(
+			new Set(
+				(attempt.questions || [])
+					.filter((q) => !q?.isCorrect)
+					.map((q) => String(q?.domain || '').trim())
+					.filter(Boolean)
+			)
+		)
+
+		const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+		const pageHeight = doc.internal.pageSize.getHeight()
+		const pageWidth = doc.internal.pageSize.getWidth()
+		const margin = 42
+		const maxWidth = pageWidth - margin * 2
+		let y = 48
+
+		const ensureSpace = (needed = 28) => {
+			if (y + needed <= pageHeight - margin) return
+			doc.addPage()
+			y = 48
+		}
+
+		const writeLine = (text, size = 11, style = 'normal', color = [47, 71, 145], spacing = 18) => {
+			ensureSpace(spacing)
+			doc.setFont('helvetica', style)
+			doc.setFontSize(size)
+			doc.setTextColor(color[0], color[1], color[2])
+			const lines = doc.splitTextToSize(String(text || ''), maxWidth)
+			doc.text(lines, margin, y)
+			y += Math.max(spacing, lines.length * 14)
+		}
+
+		writeLine('Rapport Candidat 360 - Evaluation Quiz', 16, 'bold', [13, 53, 91], 24)
+		writeLine(`Date export: ${new Date().toLocaleString('fr-FR')}`, 10, 'normal', [88, 122, 153], 16)
+		writeLine(`Candidat: ${quizReviewState.candidateName || 'N/A'}`, 11, 'bold', [16, 59, 98], 18)
+		writeLine(`Offre: ${quizReviewState.offerTitle || 'N/A'}`, 11, 'bold', [16, 59, 98], 20)
+
+		writeLine('Synthese RH', 12, 'bold', [13, 53, 91], 20)
+		writeLine(`Note globale: ${attempt.scorePercent}%`, 11, 'normal', [53, 89, 120], 16)
+		writeLine(`Bonnes reponses: ${attempt.correctAnswers}/${attempt.totalQuestions}`, 11, 'normal', [53, 89, 120], 16)
+		writeLine(`Evaluation: ${summary.gradeLabel}`, 11, 'normal', [53, 89, 120], 16)
+		writeLine(`Feedback: ${summary.feedback}`, 11, 'normal', [53, 89, 120], 18)
+		writeLine(`Axes d amelioration: ${summary.improvement}`, 11, 'normal', [53, 89, 120], 20)
+		writeLine(`Domaines faibles: ${weakDomains.join(', ') || 'Aucun axe majeur'}`, 11, 'normal', [53, 89, 120], 22)
+
+		writeLine('Details des reponses', 12, 'bold', [13, 53, 91], 20)
+		;(attempt.questions || []).forEach((question, idx) => {
+			const selectedKey = String(question?.selectedOptionKey || '').toLowerCase()
+			const correctKey = String(question?.correctOptionKey || '').toLowerCase()
+			const selectedText = getOptionTextByKey(question, selectedKey)
+			const correctText = getOptionTextByKey(question, correctKey)
+			const status = question?.isCorrect ? 'CORRECTE' : 'FAUSSE'
+
+			writeLine(`Q${idx + 1}. ${question?.question || 'Question'}`, 11, 'bold', [16, 59, 98], 18)
+			writeLine(`Statut: ${status}`, 10, 'bold', question?.isCorrect ? [16, 132, 93] : [185, 28, 28], 16)
+			writeLine(`Reponse candidat: ${selectedText}`, 10, 'normal', [53, 89, 120], 16)
+			writeLine(`Reponse correcte: ${correctText}`, 10, 'normal', [53, 89, 120], 18)
+		})
+
+		const safeCandidate = String(quizReviewState.candidateName || 'candidat').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+		doc.save(`rapport-quiz-${safeCandidate || 'candidat'}.pdf`)
+	}
+
 	const interviewDatesByDay = useMemo(() => {
 		const map = new Map()
 		for (const interview of upcomingInterviews) {
@@ -881,9 +1064,17 @@ function DashboardRec() {
 				notes: savedInterview?.notes || interviewForm.notes.trim(),
 				status: savedInterview?.status || 'Planifie',
 			}
+			const autoLinkGenerated =
+				(interviewForm.mode === 'Visio') &&
+				!interviewForm.meetingLink.trim() &&
+				Boolean(savedInterview?.meetingLink)
 
 			setInterviews((prev) => [nextInterview, ...prev])
-			setInterviewMessage('Entretien planifie avec succes. Le candidat a été notifié.')
+			setInterviewMessage(
+				autoLinkGenerated
+					? 'Entretien planifie avec succes. Lien visio genere automatiquement et candidat notifie.'
+					: 'Entretien planifie avec succes. Le candidat a ete notifie.'
+			)
 			resetInterviewForm()
 		} catch (error) {
 			setInterviewError('Serveur indisponible. Verifiez que le backend tourne.')
@@ -894,6 +1085,13 @@ function DashboardRec() {
 		setInterviewError('')
 		setInterviewMessage('')
 		setInterviews((prev) => prev.filter((it) => it.id !== interviewId))
+	}
+
+	const handleJoinInterview = (meetingLink, interviewId) => {
+		if (!meetingLink) return
+		const displayName = `${recruiter?.firstName || ''} ${recruiter?.lastName || ''}`.trim() || recruiter?.company || 'Recruteur AIR'
+		const interviewQuery = interviewId ? `&interviewId=${encodeURIComponent(interviewId)}` : ''
+		navigate(`/meet?url=${encodeURIComponent(meetingLink)}&name=${encodeURIComponent(displayName)}&role=recruteur${interviewQuery}`)
 	}
 
 	const updateSettingsField = (field, value) => {
@@ -954,8 +1152,8 @@ function DashboardRec() {
 		setPasswordError('')
 		setPasswordMessage('')
 
-		if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
-			setPasswordError('Tous les champs mot de passe sont requis.')
+		if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword || !passwordForm.verificationCode) {
+			setPasswordError('Tous les champs, y compris le code de verification, sont requis.')
 			return
 		}
 
@@ -983,6 +1181,7 @@ function DashboardRec() {
 				body: JSON.stringify({
 					currentPassword: passwordForm.currentPassword,
 					newPassword: passwordForm.newPassword,
+					verificationCode: passwordForm.verificationCode,
 				}),
 			})
 
@@ -993,11 +1192,89 @@ function DashboardRec() {
 			}
 
 			setPasswordMessage(data?.message || 'Mot de passe mis a jour avec succes.')
-			setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+			setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '', verificationCode: '' })
 		} catch {
 			setPasswordError('Serveur indisponible. Verifiez que le backend tourne.')
 		} finally {
 			setSavingPassword(false)
+		}
+	}
+
+	const handleRequestPasswordCode = async () => {
+		setPasswordError('')
+		setPasswordMessage('')
+		const recruiterId = recruiter?.id || recruiter?._id
+		if (!recruiterId) {
+			setPasswordError('Session recruteur invalide. Reconnectez-vous.')
+			return
+		}
+
+		setSendingPasswordCode(true)
+		try {
+			const response = await fetch(`${API_BASE}/recruiters/${recruiterId}/password/otp/request`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+			})
+			const data = await response.json().catch(() => ({}))
+			if (!response.ok || !data?.success) {
+				setPasswordError(data?.message || 'Impossible d envoyer le code de verification.')
+				return
+			}
+			setPasswordMessage(data?.message || 'Code de verification envoye par email.')
+		} catch {
+			setPasswordError('Serveur indisponible. Verifiez que le backend tourne.')
+		} finally {
+			setSendingPasswordCode(false)
+		}
+	}
+
+	const handleSubmitAppFeedback = async (e) => {
+		e.preventDefault()
+		setAppFeedbackError('')
+		setAppFeedbackMessage('')
+
+		const recruiterId = recruiter?.id || recruiter?._id
+		if (!recruiterId) {
+			setAppFeedbackError('Session recruteur invalide. Reconnectez-vous.')
+			return
+		}
+		if (!Number.isFinite(appFeedbackForm.rating) || appFeedbackForm.rating < 1 || appFeedbackForm.rating > 5) {
+			setAppFeedbackError('Veuillez choisir une note entre 1 et 5 etoiles.')
+			return
+		}
+
+		setAppFeedbackSaving(true)
+		try {
+			const response = await fetch(`${API_BASE}/app-feedback`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					userId: recruiterId,
+					userRole: 'recruiter',
+					rating: appFeedbackForm.rating,
+					comment: appFeedbackForm.comment,
+				}),
+			})
+
+			const data = await response.json().catch(() => ({}))
+			if (!response.ok || !data?.success) {
+				setAppFeedbackError(data?.message || 'Impossible d enregistrer votre feedback.')
+				return
+			}
+
+			setAppFeedbackMessage(data?.message || 'Merci pour votre feedback.')
+			const summaryRes = await fetch(`${API_BASE}/app-feedback/summary`)
+			const summaryData = await summaryRes.json().catch(() => ({}))
+			if (summaryRes.ok && summaryData?.success && summaryData?.summary) {
+				setAppFeedbackSummary({
+					averageRating: Number.isFinite(summaryData.summary.averageRating) ? Number(summaryData.summary.averageRating) : null,
+					totalFeedbacks: Number(summaryData.summary.totalFeedbacks || 0),
+				})
+			}
+		} catch {
+			setAppFeedbackError('Serveur indisponible. Verifiez que le backend tourne.')
+		} finally {
+			setAppFeedbackSaving(false)
 		}
 	}
 
@@ -1749,6 +2026,8 @@ function DashboardRec() {
 																			if (Array.isArray(values)) return acc + values.length
 																			return acc + 1
 																		}, 0)
+																		const quizAttempt = candidacy?.quizAttemptId && typeof candidacy.quizAttemptId === 'object' ? candidacy.quizAttemptId : null
+																		const quizScore = Number.isFinite(quizAttempt?.scorePercent) ? quizAttempt.scorePercent : null
 														const fullName = `${cand.firstName || ''} ${cand.lastName || ''}`.trim() || 'Candidat'
 														const appliedAt = candidacy?.createdAt ? new Date(candidacy.createdAt).toLocaleDateString() : 'N/A'
 														return (
@@ -1770,6 +2049,13 @@ function DashboardRec() {
 																<p className='mt-1 text-xs text-[#587a99]'>
 																	Secteur: {cand.sector || 'N/A'} - Niveau: {cand.experienceLevel || 'N/A'} - Postule le: {appliedAt}
 																</p>
+																{quizAttempt ? (
+																	<div className='mt-2 flex flex-wrap items-center gap-2'>
+																		<span className='rounded-full border border-cyan-200 bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-800'>
+																			Quiz: {quizAttempt.correctAnswers}/{quizAttempt.totalQuestions} ({quizScore}%)
+																		</span>
+																	</div>
+																) : null}
 																{cvInfo?.hasCv ? (
 																	<div className='mt-2 flex items-center gap-2'>
 																		<a
@@ -1797,10 +2083,44 @@ function DashboardRec() {
 																		<span className='text-xs text-[#587a99]'>
 																			{cvInfo.source === 'generated' ? 'CV Genere' : 'CV Uploade'}
 																		</span>
+																		{quizAttempt ? (
+																			<button
+																				type='button'
+																				onClick={() =>
+																					setQuizReviewState({
+																						open: true,
+																						candidateName: fullName,
+																						offerTitle: group.offerTitle,
+																						attempt: quizAttempt,
+																					})
+																				}
+																				className='rounded-md border border-indigo-300 bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100'
+																			>
+																				Voir réponses quiz
+																			</button>
+																		) : null}
 																	</div>
 																) : (
 																	<p className='mt-2 text-xs text-[#8aa3b9]'>CV non disponible</p>
 																)}
+																{!cvInfo?.hasCv && quizAttempt ? (
+																	<div className='mt-2'>
+																		<button
+																			type='button'
+																			onClick={() =>
+																				setQuizReviewState({
+																					open: true,
+																					candidateName: fullName,
+																					offerTitle: group.offerTitle,
+																					attempt: quizAttempt,
+																				})
+																			}
+																			className='rounded-md border border-indigo-300 bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100'
+																		>
+																			Voir réponses quiz
+																		</button>
+																	</div>
+																) : null}
 																				{cvInfo?.hasCv && cvDetailsOpenByCandidate[candidateId] ? (
 																					<div className='mt-3 overflow-hidden rounded-xl border border-[#cce6f6] bg-gradient-to-br from-[#f7fcff] via-[#eef8ff] to-[#f4fbff]'>
 																						<div className='border-b border-[#d9edf9] bg-white/60 px-3 py-2.5'>
@@ -2008,7 +2328,7 @@ function DashboardRec() {
 												<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Lien reunion {interviewForm.mode === 'Visio' ? '(recommande)' : '(optionnel)'}</label>
 												<input
 													className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-500'
-													placeholder='https://meet...'
+													placeholder={interviewForm.mode === 'Visio' ? 'Laisser vide pour generation auto (Jitsi)' : 'https://meet...'}
 													value={interviewForm.meetingLink}
 													onChange={(e) => updateInterviewField('meetingLink', e.target.value)}
 												/>
@@ -2119,14 +2439,13 @@ function DashboardRec() {
 																	<div className='rounded-lg border border-[#d8ebf8] bg-white px-3 py-2'>
 																		<p className='text-[10px] font-black uppercase tracking-[0.08em] text-[#5b7f9d]'>{it.mode === 'Visio' ? 'Lien visio' : 'Lieu'}</p>
 																		{it.mode === 'Visio' && it.meetingLink ? (
-																			<a
-																				href={it.meetingLink}
-																				target='_blank'
-																				rel='noreferrer'
+																			<button
+																				type='button'
+																				onClick={() => handleJoinInterview(it.meetingLink, it.id)}
 																				className='mt-1 inline-flex max-w-full items-center rounded-md bg-cyan-50 px-2 py-1 text-xs font-semibold text-[#0a5f88] hover:bg-cyan-100'
 																			>
-																				Ouvrir le lien
-																			</a>
+																				Rejoindre dans AIR
+																			</button>
 																		) : (
 																			<p className='mt-1 text-xs text-[#355978]'>{it.location || 'Non defini'}</p>
 																		)}
@@ -2326,6 +2645,23 @@ function DashboardRec() {
 											value={passwordForm.confirmPassword}
 											onChange={(e) => updatePasswordField('confirmPassword', e.target.value)}
 										/>
+										<div className='grid gap-2 sm:grid-cols-[1fr_auto]'>
+											<input
+												type='text'
+												className='w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-cyan-500'
+												placeholder='Code de verification recu par email'
+												value={passwordForm.verificationCode}
+												onChange={(e) => updatePasswordField('verificationCode', e.target.value)}
+											/>
+											<button
+												type='button'
+												onClick={handleRequestPasswordCode}
+												disabled={sendingPasswordCode}
+												className='rounded-xl border border-cyan-300 bg-cyan-50 px-3 py-2.5 text-xs font-semibold text-cyan-800 hover:bg-cyan-100 disabled:opacity-60'
+											>
+												{sendingPasswordCode ? 'Envoi...' : 'Envoyer code'}
+											</button>
+										</div>
 
 										<div className='pt-1'>
 											<button type='submit' disabled={savingPassword} className='rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60'>
@@ -2334,12 +2670,157 @@ function DashboardRec() {
 										</div>
 									</form>
 								</div>
+
 							</div>
 						) : (
 							<div className='mt-8 rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-5'>
 								<p className='text-sm text-[#4f7191]'>Cette section sera activee ensuite.</p>
 							</div>
 						)}
+					</div>
+					{quizReviewState.open && quizReviewState.attempt ? (
+						<div className='fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6'>
+							<div className='max-h-[88vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-cyan-200 bg-white shadow-2xl'>
+								<div className='flex items-start justify-between gap-3 border-b border-cyan-100 bg-gradient-to-r from-[#f7fcff] to-[#ecf7ff] px-5 py-4'>
+									<div>
+										<p className='text-xs font-bold uppercase tracking-[0.12em] text-[#4f7191]'>Correction quiz</p>
+										<h3 className='mt-1 text-lg font-black text-[#0d355b]'>{quizReviewState.candidateName}</h3>
+										<p className='mt-1 text-sm text-[#4f7191]'>{quizReviewState.offerTitle}</p>
+									</div>
+									<div className='flex items-center gap-2'>
+										<button
+											type='button'
+											onClick={handleExportQuizReviewPdf}
+											className='rounded-lg border border-cyan-300 bg-cyan-50 px-3 py-1.5 text-sm font-semibold text-cyan-700 hover:bg-cyan-100'
+										>
+											Exporter PDF RH
+										</button>
+										<button
+											type='button'
+											onClick={() => setQuizReviewState({ open: false, candidateName: '', offerTitle: '', attempt: null })}
+											className='rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+										>
+											Fermer
+										</button>
+									</div>
+								</div>
+
+								<div className='max-h-[72vh] space-y-4 overflow-y-auto px-5 py-4'>
+									<div className='grid gap-3 sm:grid-cols-4'>
+										<div className='rounded-xl border border-cyan-100 bg-cyan-50 px-3 py-2'>
+											<p className='text-[11px] font-bold uppercase tracking-wide text-[#4f7191]'>Note</p>
+											<p className='mt-1 text-xl font-black text-[#0d355b]'>{quizReviewState.attempt.scorePercent}%</p>
+										</div>
+										<div className='rounded-xl border border-cyan-100 bg-cyan-50 px-3 py-2'>
+											<p className='text-[11px] font-bold uppercase tracking-wide text-[#4f7191]'>Bonnes réponses</p>
+											<p className='mt-1 text-xl font-black text-[#0d355b]'>
+												{quizReviewState.attempt.correctAnswers}/{quizReviewState.attempt.totalQuestions}
+											</p>
+										</div>
+										<div className='rounded-xl border border-cyan-100 bg-cyan-50 px-3 py-2'>
+											<p className='text-[11px] font-bold uppercase tracking-wide text-[#4f7191]'>Evaluation</p>
+											<p className='mt-1 text-xl font-black text-[#0d355b]'>{quizReviewComputed?.summary.gradeLabel || '—'}</p>
+										</div>
+										<div className='rounded-xl border border-cyan-100 bg-cyan-50 px-3 py-2'>
+											<p className='text-[11px] font-bold uppercase tracking-wide text-[#4f7191]'>Axes à travailler</p>
+											<p className='mt-1 text-sm font-bold text-[#0d355b]'>{quizReviewComputed?.weakDomains.join(', ') || 'Aucun axe majeur'}</p>
+										</div>
+									</div>
+
+									<div className='grid gap-3 sm:grid-cols-2'>
+										<div className='rounded-xl border border-cyan-100 bg-[#f8fcff] px-4 py-3'>
+											<p className='text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Feedback recruteur</p>
+											<p className='mt-2 text-sm text-[#355978]'>{quizReviewComputed?.summary.feedback || '—'}</p>
+										</div>
+										<div className='rounded-xl border border-cyan-100 bg-[#f8fcff] px-4 py-3'>
+											<p className='text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Axes d amélioration</p>
+											<p className='mt-2 text-sm text-[#355978]'>{quizReviewComputed?.summary.improvement || '—'}</p>
+										</div>
+									</div>
+
+									<div className='space-y-2'>
+										<p className='text-xs font-bold uppercase tracking-[0.12em] text-[#4f7191]'>Réponses détaillées</p>
+										{(quizReviewState.attempt.questions || []).map((question, idx) => {
+											const selectedKey = String(question?.selectedOptionKey || '').toLowerCase()
+											const correctKey = String(question?.correctOptionKey || '').toLowerCase()
+											const selectedText = getOptionTextByKey(question, selectedKey)
+											const correctText = getOptionTextByKey(question, correctKey)
+											return (
+												<div
+													key={`${question?.questionId || 'q'}-${idx}`}
+													className={`rounded-xl border px-4 py-3 ${question?.isCorrect ? 'border-emerald-200 bg-emerald-50/70' : 'border-rose-200 bg-rose-50/70'}`}
+												>
+													<div className='flex flex-wrap items-center justify-between gap-2'>
+														<p className='text-sm font-bold text-[#103b62]'>Q{idx + 1}. {question?.question || 'Question'}</p>
+														<span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${question?.isCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+															{question?.isCorrect ? 'Correcte' : 'Fausse'}
+														</span>
+													</div>
+													<p className='mt-2 text-sm text-[#355978]'>
+														<span className='font-semibold'>Réponse candidat:</span> {selectedText}
+													</p>
+													{!question?.isCorrect ? (
+														<p className='mt-1 text-sm text-[#355978]'>
+															<span className='font-semibold'>Réponse correcte:</span> {correctText}
+														</p>
+													) : null}
+												</div>
+											)
+										})}
+									</div>
+								</div>
+							</div>
+						</div>
+					) : null}
+					<div className='fixed bottom-4 left-4 z-40'>
+						<button
+							type='button'
+							onClick={() => setAppFeedbackOpen((prev) => !prev)}
+							aria-label='Ouvrir le feedback AIR'
+							title='Feedback AIR'
+							className='flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] text-lg font-black text-white shadow-xl transition hover:brightness-110'
+						>
+							★
+						</button>
+						{appFeedbackOpen ? (
+							<div className='absolute bottom-14 left-0 w-[86vw] max-w-xs rounded-2xl border border-cyan-100 bg-white p-4 shadow-2xl'>
+								<div className='flex items-start justify-between gap-2'>
+									<div>
+										<p className='text-sm font-black text-[#0d355b]'>Votre avis sur AIR</p>
+										<p className='mt-1 text-xs text-[#4f7191]'>Moyenne globale: {appFeedbackSummary.averageRating ? `${appFeedbackSummary.averageRating}/5` : '—'} • {appFeedbackSummary.totalFeedbacks} avis</p>
+									</div>
+									<button type='button' onClick={() => setAppFeedbackOpen(false)} className='rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50'>Fermer</button>
+								</div>
+
+								{appFeedbackError ? <div className='mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700'>{appFeedbackError}</div> : null}
+								{appFeedbackMessage ? <div className='mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700'>{appFeedbackMessage}</div> : null}
+
+								<form className='mt-3 space-y-3' onSubmit={handleSubmitAppFeedback}>
+									<div className='flex items-center gap-2'>
+										{[1, 2, 3, 4, 5].map((star) => (
+											<button
+												key={star}
+												type='button'
+												onClick={() => setAppFeedbackForm((prev) => ({ ...prev, rating: star }))}
+												className={`h-9 w-9 rounded-full border text-base transition ${star <= appFeedbackForm.rating ? 'border-amber-300 bg-amber-100 text-amber-600' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'}`}
+											>
+												★
+											</button>
+										))}
+									</div>
+									<textarea
+										rows={3}
+										value={appFeedbackForm.comment}
+										onChange={(e) => setAppFeedbackForm((prev) => ({ ...prev, comment: e.target.value }))}
+										placeholder='Votre commentaire (optionnel)'
+										className='w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-cyan-500'
+									/>
+									<button type='submit' disabled={appFeedbackSaving} className='w-full rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60'>
+										{appFeedbackSaving ? 'Envoi...' : 'Envoyer'}
+									</button>
+								</form>
+							</div>
+						) : null}
 					</div>
 				</main>
 			</div>
