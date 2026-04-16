@@ -2155,20 +2155,46 @@ function DashboardRec() {
 														const cand = candidacy?.candidateId || {}
 														const candidateId = typeof candidacy?.candidateId === 'string' ? candidacy?.candidateId : candidacy?.candidateId?._id
 														const cvInfo = candidateId ? cvByCandidate[candidateId] : null
-																		const extraction = candidateId ? cvExtractionByCandidate[candidateId] : null
-																		const extractionSource = extraction?.entities && typeof extraction.entities === 'object'
-																			? extraction.entities
-																			: extraction?.storedCategories && typeof extraction.storedCategories === 'object'
-																				? extraction.storedCategories
-																				: {}
-																		const extractionEntries = Object.entries(extractionSource).filter(([, values]) => {
-																			if (!Array.isArray(values)) return Boolean(values)
-																			return values.length > 0
-																		})
-																		const extractionValuesCount = extractionEntries.reduce((acc, [, values]) => {
-																			if (Array.isArray(values)) return acc + values.length
-																			return acc + 1
-																		}, 0)
+																const extraction = candidateId ? cvExtractionByCandidate[candidateId] : null
+																const extractionSources = [
+																	extraction?.entities && typeof extraction.entities === 'object' ? extraction.entities : {},
+																	extraction?.storedCategories && typeof extraction.storedCategories === 'object' ? extraction.storedCategories : {},
+																]
+																const extractionSource = extractionSources.reduce((acc, source) => {
+																	for (const [label, values] of Object.entries(source)) {
+																		const normalizedValues = Array.isArray(values) ? values : [values]
+																		if (!acc[label]) acc[label] = []
+																		acc[label].push(...normalizedValues)
+																		acc[label] = Array.from(new Set(acc[label].map((item) => String(item || '').trim()).filter(Boolean)))
+																	}
+																	return acc
+																}, {})
+																const groupedExtractionEntries = Object.entries(extractionSource).reduce((acc, [label, values]) => {
+																	const displayLabel = getExtractionLabel(label)
+																	const groupKey = String(displayLabel || '').toLowerCase().trim()
+																	if (!groupKey) return acc
+
+																	const normalizedValues = Array.isArray(values) ? values : [values]
+																	if (!acc[groupKey]) {
+																		acc[groupKey] = { label: displayLabel, values: [] }
+																	}
+
+																	acc[groupKey].values.push(...normalizedValues)
+																	acc[groupKey].values = Array.from(
+																		new Set(acc[groupKey].values.map((item) => String(item || '').trim()).filter(Boolean))
+																	)
+																	return acc
+																}, {})
+																const extractionEntries = Object.values(groupedExtractionEntries)
+																	.map((entry) => [entry.label, entry.values])
+																	.filter(([, values]) => {
+																		if (!Array.isArray(values)) return Boolean(values)
+																		return values.length > 0
+																	})
+																const extractionValuesCount = extractionEntries.reduce((acc, [, values]) => {
+																	if (Array.isArray(values)) return acc + values.length
+																	return acc + 1
+																}, 0)
 																		const quizAttempt = candidacy?.quizAttemptId && typeof candidacy.quizAttemptId === 'object' ? candidacy.quizAttemptId : null
 																		const quizScore = Number.isFinite(quizAttempt?.scorePercent) ? quizAttempt.scorePercent : null
 														const fullName = `${cand.firstName || ''} ${cand.lastName || ''}`.trim() || 'Candidat'

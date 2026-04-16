@@ -2,10 +2,15 @@ import os
 import tempfile
 from pathlib import Path
 import spacy
+try:
+    import spacy_transformers  # noqa: F401
+    _HAS_SPACY_TRANSFORMERS = True
+except Exception:
+    _HAS_SPACY_TRANSFORMERS = False
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from test_cv import clean_entity, prepare_text_for_nlp, read_file, rule_based_extras, translate_text_if_needed
+from test_cv import clean_entity, read_file, rule_based_extras, translate_text_if_needed
 
 app = FastAPI(title="CV Extractor API")
 
@@ -17,14 +22,45 @@ app.add_middleware(
 )
 
 _nlp = None
-_MODEL_DIR = (Path(__file__).resolve().parent / "model_trf" / "model-best").as_posix()
+_MODEL_DIR = (Path(__file__).resolve().parent / "model-best").as_posix()
+
+
+def _patch_spacy_pydantic_schema():
+    try:
+        from spacy import schemas as spacy_schemas
+        from spacy.language import Language
+
+        if hasattr(spacy_schemas, "ConfigSchemaNlp"):
+            spacy_schemas.ConfigSchemaNlp.model_rebuild(
+                _types_namespace={"Language": Language}
+            )
+    except Exception:
+        pass
 
 
 def get_nlp():
     global _nlp
     if _nlp is None:
+        if not _HAS_SPACY_TRANSFORMERS:
+            raise RuntimeError(
+                "Le package spacy-transformers est requis pour charger ce modèle (pipeline transformer)."
+            )
+        _patch_spacy_pydantic_schema()
         _nlp = spacy.load(_MODEL_DIR)
     return _nlp
+
+
+def get_model_metrics(nlp):
+    """Return training metrics embedded in spaCy model metadata."""
+    perf = (nlp.meta or {}).get("performance", {})
+    return {
+        "source": "model_meta_performance",
+        "accuracy": perf.get("token_acc"),
+        "precision": perf.get("ents_p"),
+        "recall": perf.get("ents_r"),
+        "f1": perf.get("ents_f"),
+        "per_type": perf.get("ents_per_type", {}),
+    }
 
 
 @app.get("/")
@@ -53,9 +89,6 @@ async def extract(
         nlp_text, translation_info = translate_text_if_needed(
             source_text, translate, target_lang
         )
-        nlp_text, trim_info = prepare_text_for_nlp(nlp_text)
-        if not nlp_text:
-            raise HTTPException(status_code=400, detail="Texte exploitable vide après prétraitement.")
 
         nlp = get_nlp()
         doc = nlp(nlp_text)
@@ -89,25 +122,13 @@ async def extract(
         return {
             "status": "ok",
             "translation": translation_info,
-            "nlp_trim": trim_info,
             "source_preview": source_text[:700],
             "entities": grouped,
+            "model_metrics": get_model_metrics(nlp),
         }
 
     except HTTPException:
         raise
-    except RuntimeError as exc:
-        msg = str(exc)
-        low = msg.lower()
-        if "not enough memory" in low or "alloc_cpu" in low or "out of memory" in low:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Mémoire insuffisante pendant l'analyse du CV. "
-                    "Réessayez avec un CV plus court/texte nettoyé ou augmentez la RAM disponible."
-                ),
-            )
-        raise HTTPException(status_code=500, detail=msg)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     finally:
