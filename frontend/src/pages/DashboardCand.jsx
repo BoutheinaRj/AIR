@@ -219,6 +219,7 @@ function DashboardCand() {
 			// Ignore localStorage failures
 		}
 	}, [isDarkMode])
+	
 
 	useEffect(() => {
 		const job = jobs.find((j) => j.id === selectedJobId) || null
