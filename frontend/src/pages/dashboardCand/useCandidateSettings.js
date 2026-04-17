@@ -162,7 +162,21 @@ export function useCandidateSettings({ apiBase, candidate, setCandidate, setSele
 				setSettingsCvError(data?.message || 'Upload CV impossible.')
 				return
 			}
-			setSettingsCvMessage(data?.message || 'CV uploadé.')
+
+			let extractionMessage = ''
+			try {
+				const extractRes = await fetch(`${apiBase}/cv/extract/${encodeURIComponent(candidateId)}`)
+				const extractData = await extractRes.json().catch(() => ({}))
+				if (extractRes.ok && extractData?.success) {
+					extractionMessage = 'Extraction terminée.'
+				} else {
+					extractionMessage = extractData?.message || 'Extraction lancée avec réserves.'
+				}
+			} catch {
+				extractionMessage = 'Extraction indisponible pour le moment.'
+			}
+
+			setSettingsCvMessage(`${data?.message || 'CV uploadé.'} ${extractionMessage}`.trim())
 			setSettingsCvFile(null)
 			setSelectedView('cv')
 		} catch {

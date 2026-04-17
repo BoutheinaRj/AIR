@@ -2688,6 +2688,13 @@ app.post('/api/cv/upload', (req, res) => {
         });
       }
 
+      if (!mongoose.Types.ObjectId.isValid(String(candidateId))) {
+        return res.status(400).json({
+          success: false,
+          message: 'candidateId invalide.',
+        });
+      }
+
       const candidate = await Candidate.findById(candidateId);
       if (!candidate) {
         return res.status(404).json({

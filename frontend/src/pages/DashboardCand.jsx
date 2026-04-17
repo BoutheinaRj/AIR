@@ -993,30 +993,69 @@ function DashboardCand() {
 			return
 		}
 
-		if (activeCvId && activeCvMeta?.source === 'generated') {
-			try {
-				const res = await fetch(`${API_BASE}/cv/by-id/${activeCvId}?candidateId=${encodeURIComponent(candidateId)}`)
-				const data = await res.json().catch(() => ({}))
-				if (!res.ok || !data?.success) throw new Error(data?.message || 'Impossible de charger le CV.')
-				const cv = data?.cv || null
-				if (!cv) throw new Error('CV introuvable.')
-
-				const personal = cv?.personal || null
-				const content = cv?.content || null
-				const hasStructuredData =
-					(personal && Object.keys(personal).length > 0) || (content && Object.keys(content).length > 0)
-
-				if (hasStructuredData) {
-					saveCvDraft(candidateId, { personal: personal || {}, content: content || {} })
-				}
-				navigate('/EspaceCandidat/construire/etape-1')
-			} catch (e) {
-				setSettingsCvError(String(e?.message || 'Erreur'))
-			}
+		if (!activeCvId) {
+			setSettingsCvError('Aucun CV actif trouvé.')
 			return
 		}
 
-		navigate('/EspaceCandidat/construire/etape-1')
+		try {
+			const res = await fetch(`${API_BASE}/cv/by-id/${activeCvId}?candidateId=${encodeURIComponent(candidateId)}`)
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) throw new Error(data?.message || 'Impossible de charger le CV.')
+			const cv = data?.cv || null
+			if (!cv) throw new Error('CV introuvable.')
+
+			const extractionCategories = cv?.extraction?.categories && typeof cv.extraction.categories === 'object' ? cv.extraction.categories : {}
+			const firstNonEmpty = (values) => {
+				if (!Array.isArray(values)) return ''
+				return values.map((value) => String(value || '').trim()).find(Boolean) || ''
+			}
+			const listToText = (values, separator = '\n') => {
+				if (!Array.isArray(values)) return ''
+				return values.map((value) => String(value || '').trim()).filter(Boolean).join(separator)
+			}
+			const listToLanguageItems = (values) => {
+				if (!Array.isArray(values)) return []
+				return values.map((value) => String(value || '').trim()).filter(Boolean).map((name) => ({ name, level: '', certification: '' }))
+			}
+			const listToSimpleItems = (values) => {
+				if (!Array.isArray(values)) return []
+				return values.map((value) => String(value || '').trim()).filter(Boolean).map((name) => ({ name, organization: '', obtainedAt: '', expiresAt: '', identifier: '', verificationUrl: '' }))
+			}
+
+			const personal = {
+				firstName: cv?.personal?.firstName || candidate?.firstName || '',
+				lastName: cv?.personal?.lastName || candidate?.lastName || '',
+				professionalTitle: cv?.personal?.professionalTitle || candidate?.professionalTitle || '',
+				email: cv?.personal?.email || candidate?.email || '',
+				phone: cv?.personal?.phone || candidate?.phone || '',
+				city: cv?.personal?.city || candidate?.city || '',
+				country: cv?.personal?.country || candidate?.country || '',
+				linkedin: cv?.personal?.linkedin || candidate?.linkedin || '',
+				portfolio: cv?.personal?.portfolio || candidate?.portfolioUrl || '',
+				birthDate: cv?.personal?.birthDate || (candidate?.birthDate ? String(candidate.birthDate).slice(0, 10) : ''),
+				nationality: cv?.personal?.nationality || candidate?.nationality || '',
+				profileImageDataUrl: cv?.personal?.profileImageDataUrl || candidate?.profileImage || '',
+			}
+			const content = {
+				professionalSummary: cv?.content?.professionalSummary || firstNonEmpty(extractionCategories.summary),
+				education: cv?.content?.education || listToText(extractionCategories.education),
+				experience: cv?.content?.experience || listToText(extractionCategories.experiences),
+				skills: cv?.content?.skills || listToText(extractionCategories.skills, ', '),
+				educationItems: Array.isArray(cv?.content?.educationItems) ? cv.content.educationItems : [],
+				experienceItems: Array.isArray(cv?.content?.experienceItems) ? cv.content.experienceItems : [],
+				languages: Array.isArray(cv?.content?.languages) && cv.content.languages.length > 0 ? cv.content.languages : listToLanguageItems(extractionCategories.languages),
+				certifications: Array.isArray(cv?.content?.certifications) && cv.content.certifications.length > 0 ? cv.content.certifications : listToSimpleItems(extractionCategories.certifications),
+				projects: Array.isArray(cv?.content?.projects) ? cv.content.projects : [],
+				qualities: Array.isArray(cv?.content?.qualities) ? cv.content.qualities : [],
+				interests: Array.isArray(cv?.content?.interests) ? cv.content.interests : [],
+			}
+
+			saveCvDraft(candidateId, { personal, content })
+			navigate('/EspaceCandidat/construire/etape-1')
+		} catch (e) {
+			setSettingsCvError(String(e?.message || 'Erreur'))
+		}
 	}
 
 	const candidateInitials = useMemo(() => {

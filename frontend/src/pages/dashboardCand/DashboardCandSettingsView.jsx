@@ -174,11 +174,11 @@ export function DashboardCandSettingsView({
 
 				<div className='space-y-5'>
 					<div className='rounded-2xl border border-[#b6cfe6] bg-[#f5faff] p-5 shadow-[0_8px_20px_rgba(8,51,93,0.08)]'>
-						<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CV GÉNÉRÉ</p>
-						<p className='mt-2 text-sm text-slate-600'>Modifiez vos informations puis régénérez un nouveau CV (il sera ajouté à l’historique).</p>
+						<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>REPRENDRE LE CV ACTUEL</p>
+						<p className='mt-2 text-sm text-slate-600'>Rouvrez le CV actif dans l’éditeur pour le modifier ou repartir de l’extraction disponible.</p>
 						<div className='mt-4'>
 							<button type='button' onClick={handleEditActiveGeneratedCv} className='rounded-xl bg-[#001d3e] px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-95'>
-								Modifier et générer un nouveau CV
+								Modifier le CV actuel
 							</button>
 						</div>
 					</div>
@@ -202,7 +202,7 @@ export function DashboardCandSettingsView({
 						</div>
 						<div className='mt-3'>
 							<button type='button' onClick={handleUploadCvFromSettings} disabled={settingsCvUploading} className={`rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition ${settingsCvUploading ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}>
-								{settingsCvUploading ? 'Upload…' : 'Uploader un nouveau CV'}
+								{settingsCvUploading ? 'Upload…' : 'Remplacer par un nouveau CV'}
 							</button>
 						</div>
 					</div>
