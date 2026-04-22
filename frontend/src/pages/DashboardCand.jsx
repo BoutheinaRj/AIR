@@ -455,6 +455,10 @@ function DashboardCand() {
 				],
 			},
 			{
+				title: 'Espace formation',
+				items: [{ key: 'formation', label: 'Formations' }],
+			},
+			{
 				title: 'Compte',
 				items: [
 					{ key: 'assistant', label: 'Assistant IA', badge: 'En ligne' },
@@ -1655,6 +1659,40 @@ function DashboardCand() {
 								updatePasswordField={updatePasswordField}
 								passwordSaving={passwordSaving}
 							/>
+						) : selectedView === 'formation' ? (
+							<div className='mt-6'>
+								<div className='rounded-2xl border border-cyan-100 bg-white p-4 shadow-[0_14px_30px_rgba(2,132,199,0.1)]'>
+									<div className='grid gap-4 md:grid-cols-[320px_1fr]'>
+										<div className='h-52 w-full rounded-xl border-2 border-dashed border-cyan-300 bg-cyan-50/60 p-3'>
+											<img
+												src={assets.React}
+												alt='Formation React'
+												className='h-full w-full rounded-lg border border-cyan-200 object-cover'
+											/>
+										</div>
+										<div className='flex min-h-[208px] flex-col justify-between'>
+											<div>
+												<div className='inline-flex rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-semibold tracking-wide text-cyan-700'>
+													Formations
+												</div>
+												<h3 className='mt-3 text-2xl font-black text-[#0b3558]'>Apprendre les fondamentaux de React</h3>
+												<p className='mt-2 text-sm text-[#4f7191]'>Version francaise de Learn the fundamentals of React.</p>
+											</div>
+											<div className='mt-4 flex flex-wrap gap-3'>
+												<button
+													type='button'
+													className='rounded-xl bg-[#0b3558] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-95'
+												>
+													Voir la formation
+												</button>
+												<span className='inline-flex items-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600'>
+													Niveau: Debutant
+												</span>
+											</div>
+										</div>
+									</div>
+								</div>
+							</div>
 						) : selectedView === 'dashboard' ? (
 							<DashboardCandAnalyticsView
 								dashboardLoading={dashboardLoading}
