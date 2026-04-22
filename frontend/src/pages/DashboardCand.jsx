@@ -893,10 +893,12 @@ function DashboardCand() {
 	}
 
 	const handleJoinInterviewMeet = (meetingLink, interviewId) => {
-		if (!meetingLink) return
+		const raw = String(meetingLink || '').trim()
+		if (!raw) return
+		const normalizedLink = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
 		const displayName = `${candidate?.firstName || ''} ${candidate?.lastName || ''}`.trim() || 'Candidat AIR'
 		const interviewQuery = interviewId ? `&interviewId=${encodeURIComponent(interviewId)}` : ''
-		navigate(`/meet?url=${encodeURIComponent(meetingLink)}&name=${encodeURIComponent(displayName)}&role=candidat${interviewQuery}`)
+		navigate(`/meet?url=${encodeURIComponent(normalizedLink)}&name=${encodeURIComponent(displayName)}&role=candidat${interviewQuery}`)
 	}
 
 	const handleAnalyzeCv = async () => {
