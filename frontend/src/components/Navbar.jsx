@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react'
 import { assets } from '../assets/assets'
 import { useLocation, useNavigate } from 'react-router-dom'
 
+
+
+
 const NAV_ITEMS = [
   { id: 'fonctionnalites', label: 'Fonctionnalités' },
   { id: 'processus', label: 'Processus' },
@@ -10,11 +13,16 @@ const NAV_ITEMS = [
   { id: 'feedback', label: 'Feedback' }
 ]
 
+
 function Navbar() {
   const navigate = useNavigate()
   const location = useLocation()
+  
+if (location.pathname.startsWith('/admin')) return null
+
   const [showScrollTop, setShowScrollTop] = useState(false)
   const [activeSection, setActiveSection] = useState('')
+  
 
   useEffect(() => {
     const handleScroll = () => {
@@ -91,6 +99,8 @@ function Navbar() {
 
     navigate({ pathname: '/', hash: `#${sectionId}` })
   }
+  
+
 
   return (
     <>

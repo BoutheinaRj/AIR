@@ -2,6 +2,16 @@ import React, { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { assets } from '../assets/assets'
 
+const handleBannedAccount = (entity, setAuthError, navigate) => {
+	if (entity?.banned) {
+		const reason = entity?.banReason ? ` - ${entity.banReason}` : ''
+		setAuthError(`Compte banni${reason}`)
+		navigate('/banned') // or '/login'
+		return true
+	}
+	return false
+}
+
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const COUNTRY_EMOJI_FONT = '"Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", "Jost", sans-serif'
 const SIGNUP_COUNTRY_OTHER = '__OTHER__'
@@ -83,35 +93,79 @@ function CnnxRec() {
 
 	const selectedSignupCountryValue = isSignupCustomCountry ? SIGNUP_COUNTRY_OTHER : String(signupData.country || '')
 
-	const handleLoginSubmit = async (e) => {
-		e.preventDefault()
-		setAuthError('')
-		setLoginPressed(true)
-		setTimeout(() => setLoginPressed(false), 240)
+     const handleLoginSubmit = async (e) => {
+	e.preventDefault()
+	setAuthError('')
+	setLoginPressed(true)
+	setTimeout(() => setLoginPressed(false), 240)
 
-		try {
-			setLoginLoading(true)
-			const response = await fetch(`${API_BASE}/recruiters/login`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(loginData),
-			})
+	setLoginLoading(true)
 
-			const data = await response.json()
-			if (!response.ok || !data.success) {
-				setAuthError(data.message || 'Connexion impossible.')
+	try {
+		// =========================
+		// 1. ADMIN LOGIN
+		// =========================
+		let response = await fetch(`${API_BASE}/admin/login`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(loginData),
+		})
+
+		let data = await response.json()
+
+		if (response.ok && data.success && data.admin) {
+			
+			// 🚨 BAN CHECK (admin)
+			if (data.admin.banned) {
+				setAuthError("Votre compte admin est banni.")
 				return
 			}
 
-			localStorage.setItem('airRecruiter', JSON.stringify(data.recruiter))
-			window.dispatchEvent(new Event('localStorageChange')) // ADD
-			navigate('/EspaceRecruteur')
-		} catch (error) {
-			setAuthError('Serveur indisponible. Verifiez que le backend tourne.')
-		} finally {
-			setLoginLoading(false)
+			localStorage.setItem('airAdmin', JSON.stringify(data.admin))
+			navigate('/admin/dashboard')
+			return
 		}
+
+		// =========================
+		// 2. RECRUITER LOGIN
+		// =========================
+		response = await fetch(`${API_BASE}/recruiters/login`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(loginData),
+		})
+
+		data = await response.json()
+
+		if (!response.ok || !data.success || !data.recruiter) {
+			setAuthError(data?.message || 'Identifiants invalides.')
+			return
+		}
+
+		// 🚨 BAN CHECK (recruiter)
+		if (data.recruiter.banned) {
+			setAuthError("Votre compte recruteur a été banni.")
+			return
+		}
+
+		// =========================
+		// 3. STORE SESSION
+		// =========================
+		localStorage.setItem('airRecruiter', JSON.stringify(data.recruiter))
+		window.dispatchEvent(new Event('localStorageChange'))
+
+		// =========================
+		// 4. REDIRECT
+		// =========================
+		navigate('/EspaceRecruteur')
+
+	} catch (error) {
+		console.error(error)
+		setAuthError('Serveur indisponible.')
+	} finally {
+		setLoginLoading(false)
 	}
+}
 
 	const handleSignupSubmit = async (e) => {
 		e.preventDefault()

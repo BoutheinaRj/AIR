@@ -1,0 +1,7 @@
+# analyse-cv/requirements_sbert.txt
+# Install with: pip install -r requirements_sbert.txt
+
+flask>=3.0.0
+flask-cors>=4.0.0
+sentence-transformers>=3.0.0
+torch>=2.0.0

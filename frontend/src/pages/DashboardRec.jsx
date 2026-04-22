@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { assets } from '../assets/assets'
 import { useNavigate } from 'react-router-dom'
 import { jsPDF } from 'jspdf'
+import ScoreButton from '../components/ScoreButton'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const API_ORIGIN = API_BASE.replace(/\/api\/?$/, '')
@@ -2307,6 +2308,11 @@ function DashboardRec() {
 																		Donner rendez-vous
 																	</button>
 																</div>
+																<ScoreButton
+                                                                  candidacyId={candidacy._id}
+                                                                  existingScore={candidacy.sbertScore}   // shows saved score immediately
+                                                                  onScored={(newScore) => console.log(newScore)}  // optional callback
+                                                                />
 																<p className='mt-1 text-xs text-[#587a99]'>
 																	{cand.email || 'Email non renseigne'}
 																	{cand.professionalTitle ? ` - ${cand.professionalTitle}` : ''}

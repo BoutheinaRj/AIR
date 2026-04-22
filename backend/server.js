@@ -998,6 +998,12 @@ app.post('/api/recruiters/login', async (req, res) => {
         message: 'Identifiants invalides.',
       });
     }
+    if (recruiter.banned) {
+  return res.status(403).json({
+    success: false,
+    message: `Compte suspendu${recruiter.banReason ? ` — ${recruiter.banReason}` : ''}. Contactez le support AIR.`,
+  });
+}
 
     return res.status(200).json({
       success: true,
@@ -1390,6 +1396,12 @@ app.post('/api/candidates/login', async (req, res) => {
         message: 'Identifiants invalides.',
       });
     }
+    if (candidate.banned) {
+  return res.status(403).json({
+    success: false,
+    message: `Compte suspendu${candidate.banReason ? ` — ${candidate.banReason}` : ''}. Contactez le support AIR.`,
+  });
+}
 
     const session = await CandidateSession.create({
       candidateId: candidate._id,
@@ -5099,3 +5111,7 @@ connectDB().finally(() => {
     }
   });
 });
+const scoreRouter = require('./routes/score');
+app.use('/api/score', scoreRouter);
+app.use('/api/admin', require('./routes/admin'));
+

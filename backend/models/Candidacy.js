@@ -1,3 +1,5 @@
+// backend/models/Candidacy.js  (updated — added sbertScore + sbertScoredAt)
+
 const mongoose = require('mongoose');
 
 const candidacySchema = new mongoose.Schema(
@@ -35,6 +37,20 @@ const candidacySchema = new mongoose.Schema(
       max: 100,
       default: null,
     },
+
+    // ── SBERT semantic similarity score (0–100) ──────────────────────────────
+    sbertScore: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: null,
+    },
+    sbertScoredAt: {
+      type: Date,
+      default: null,
+    },
+    // ─────────────────────────────────────────────────────────────────────────
+
     status: {
       type: String,
       enum: ['applied', 'reviewed', 'accepted', 'rejected'],

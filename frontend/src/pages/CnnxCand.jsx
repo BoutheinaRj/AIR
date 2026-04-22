@@ -1,6 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { assets } from '../assets/assets'
+const handleBannedAccount = (entity, setAuthError, navigate) => {
+	if (entity?.banned) {
+		const reason = entity?.banReason ? ` - ${entity.banReason}` : ''
+		setAuthError(`Compte banni${reason}`)
+		navigate('/banned') // or '/login'
+		return true
+	}
+	return false
+}
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const SIGNUP_COUNTRY_OTHER = '__OTHER__'
@@ -105,59 +114,77 @@ function CnnxCand() {
 		setLoginData((prev) => ({ ...prev, [field]: value }))
 	}
 
-	const handleLoginSubmit = async (e) => {
-		e.preventDefault()
-		setAuthError('')
-		setLoginPressed(true)
-		setTimeout(() => setLoginPressed(false), 240)
+     const handleLoginSubmit = async (e) => {
+	e.preventDefault()
+	setAuthError('')
+	setLoginPressed(true)
+	setTimeout(() => setLoginPressed(false), 240)
+
+	try {
+		setLoginLoading(true)
+
+		// ADMIN
+		let response = await fetch(`${API_BASE}/admin/login`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(loginData),
+		})
+
+		let data = await response.json()
+
+		if (response.ok && data.success && data.admin) {
+			if (handleBannedAccount(data.admin, setAuthError, navigate)) return
+
+			localStorage.setItem('airAdmin', JSON.stringify(data.admin))
+			navigate('/admin/dashboard')
+			return
+		}
+
+		// CANDIDATE
+		response = await fetch(`${API_BASE}/candidates/login`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(loginData),
+		})
+
+		data = await response.json()
+
+		if (!response.ok || !data.success || !data.candidate) {
+			setAuthError(data?.message || 'Identifiants invalides.')
+			return
+		}
+
+		if (handleBannedAccount(data.candidate, setAuthError, navigate)) return
+
+		// ONLY STORE AFTER CLEAR PASS
+		localStorage.setItem('airCandidate', JSON.stringify(data.candidate))
+
+		if (data?.sessionId) {
+			localStorage.setItem('airCandidateSessionId', String(data.sessionId))
+			window.dispatchEvent(new Event('localStorageChange'))
+		}
+
+		let nextRoute = '/EspaceCandidat'
 
 		try {
-			setLoginLoading(true)
-			const response = await fetch(`${API_BASE}/candidates/login`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(loginData),
-			})
-
-			const data = await response.json()
-			if (!response.ok || !data.success) {
-				setAuthError(data.message || 'Connexion impossible.')
-				return
-			}
-
-			localStorage.setItem('airCandidate', JSON.stringify(data.candidate))
-			if (data?.sessionId) {
-				localStorage.setItem('airCandidateSessionId', String(data.sessionId))
-				window.dispatchEvent(new Event('localStorageChange'))
-			} else {
-				localStorage.removeItem('airCandidateSessionId')
-			}
-
-			let nextRoute = '/EspaceCandidat'
-			try {
-				const candidateId = data?.candidate?.id
-				if (candidateId) {
-					const cvResponse = await fetch(`${API_BASE}/cv/by-candidate/${candidateId}`, {
-						method: 'GET',
-					})
-					if (cvResponse.ok) {
-						const cvData = await cvResponse.json()
-						if (cvData?.success) {
-							nextRoute = '/EspaceCandidat/dashboard'
-						}
-					}
+			const candidateId = data?.candidate?.id
+			if (candidateId) {
+				const cvResponse = await fetch(`${API_BASE}/cv/by-candidate/${candidateId}`)
+				if (cvResponse.ok) {
+					const cvData = await cvResponse.json()
+					if (cvData?.success) nextRoute = '/EspaceCandidat/dashboard'
 				}
-			} catch {
-				// If CV check fails, keep the default route.
 			}
+		} catch {}
 
-			navigate(nextRoute)
-		} catch (error) {
-			setAuthError('Serveur indisponible. Verifiez que le backend tourne.')
-		} finally {
-			setLoginLoading(false)
-		}
+		navigate(nextRoute)
+	} catch (error) {
+		console.error(error)
+		setAuthError('Serveur indisponible.')
+	} finally {
+		setLoginLoading(false)
 	}
+}
 
 	const handleSignupSubmit = async (e) => {
 		e.preventDefault()

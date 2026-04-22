@@ -17,6 +17,7 @@ import ChooseRole from './pages/ChooseRole.jsx'
 import MotDePasseOublie from './pages/MotDePasseOublie.jsx'
 import './index.css';
 import ChatWidget from './components/ChatWidget';
+import DashboardAdmin from './pages/DashboardAdmin.jsx'
 
 
 
@@ -64,6 +65,7 @@ function App() {
       <Route path='/EspaceCandidat/construire/etape-2' element={<CandidateCVBuilder/>}/>
       <Route path='/EspaceCandidat/construire/finaliser' element={<CandidateCVBuildReview/>}/>
       <Route path='/meet' element={<InterviewMeet/>}/>
+      <Route path="/admin/dashboard" element={<DashboardAdmin />} />
       
     </Routes>
     </main>

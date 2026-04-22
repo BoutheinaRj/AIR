@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 
 const candidateSchema = new mongoose.Schema(
   {
+    banned:    { type: Boolean, default: false },
+    banReason: { type: String, default: '' },
     firstName: {
       type: String,
       required: true,
@@ -61,6 +63,7 @@ const candidateSchema = new mongoose.Schema(
   {
     timestamps: true,
   }
+  
 );
 
 module.exports = mongoose.model('Candidate', candidateSchema);

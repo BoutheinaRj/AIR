@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 
 const recruiterSchema = new mongoose.Schema(
   {
+    banned:    { type: Boolean, default: false },
+    banReason: { type: String, default: '' },
     firstName: {
       type: String,
       required: true,
