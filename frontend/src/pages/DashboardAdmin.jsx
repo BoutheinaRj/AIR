@@ -95,10 +95,10 @@ function TH({ children }) {
   return <th className="px-4 py-3 text-[11px] font-black uppercase tracking-[0.12em] text-[#5b7f9d]">{children}</th>
 }
 
-const VIEWS = ['overview', 'recruiters', 'candidates', 'offers', 'candidacies', 'feedback']
+const VIEWS = ['overview', 'recruiters', 'candidates', 'offers', 'candidacies','formations', 'feedback']
 const VIEW_LABELS = {
   overview: 'Vue globale', recruiters: 'Recruteurs', candidates: 'Candidats',
-  offers: 'Offres', candidacies: 'Candidatures', feedback: 'Feedback',
+  offers: 'Offres', candidacies: 'Candidatures', formations: 'Formations', feedback: 'Feedback',
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
@@ -583,6 +583,12 @@ export default function DashboardAdmin() {
               </div>
             )}
           </div>
+          {view === 'formations' && !loading && (
+  <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
+    <p className="text-lg font-black text-[#0d355b]">Formations</p>
+    <p className="mt-2 text-sm text-[#8aa3b9]">Cette section est en cours de développement.</p>
+  </div>
+)}
         </main>
       </div>
 
