@@ -24,6 +24,7 @@ const AppFeedback = require('./models/AppFeedback');
 const Chat = require('./models/Chat');
 const CandidateSession = require('./models/CandidateSession');
 const QuizAttempt = require('./models/QuizAttempt');
+const ScoreMatchOffre = require('./models/ScoreMatchOffre');
 
 const DirectMessage = require('./models/DirectMessage'); 
 
@@ -3737,6 +3738,38 @@ app.get('/api/offers/match/:candidateId', async (req, res) => {
         if (semanticDiff !== 0) return semanticDiff;
         return String(a?.offerId || '').localeCompare(String(b?.offerId || ''));
       });
+
+    // Persist latest score per candidate/offer in MongoDB collection `score-MatchOffre`.
+    if (matches.length > 0) {
+      const now = new Date();
+      const writes = matches.map((m) => ({
+        updateOne: {
+          filter: {
+            candidateId,
+            jobOfferId: m.offerId,
+          },
+          update: {
+            $set: {
+              cvId: cv?._id || null,
+              score: Number.isFinite(m?.score) ? m.score : 0,
+              keywordScore: Number.isFinite(m?.keywordScore) ? m.keywordScore : null,
+              semanticScore: Number.isFinite(m?.semanticScore) ? m.semanticScore : null,
+              keywords: Array.isArray(m?.keywords) ? m.keywords : [],
+              matchedKeywords: Array.isArray(m?.matchedKeywords) ? m.matchedKeywords : [],
+              missingKeywords: Array.isArray(m?.missingKeywords) ? m.missingKeywords : [],
+              computedAt: now,
+            },
+            $setOnInsert: {
+              candidateId,
+              jobOfferId: m.offerId,
+            },
+          },
+          upsert: true,
+        },
+      }));
+
+      await ScoreMatchOffre.bulkWrite(writes, { ordered: false });
+    }
 
     return res.status(200).json({ success: true, matches });
   } catch (error) {
