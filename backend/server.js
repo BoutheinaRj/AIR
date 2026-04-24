@@ -1,6 +1,10 @@
+const dotenv = require('dotenv')
+dotenv.config()
+
+
 const express = require('express');
 const cors = require('cors');
-const dotenv = require('dotenv');
+//const dotenv = require('dotenv');
 const mongoose = require('mongoose');
 const path = require('path');
 const fs = require('fs');
@@ -27,7 +31,9 @@ const QuizAttempt = require('./models/QuizAttempt');
 
 const DirectMessage = require('./models/DirectMessage'); 
 
-dotenv.config();
+//#dotenv.config();
+//#require('dotenv').config()
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
