@@ -1822,7 +1822,10 @@ function DashboardCand() {
 								handleAssistantSend={handleAssistantSend}
 							/>
 						) : selectedView === 'candidatures' ? (
-							<DashboardCandCandidaturesView candidacies={candidacies} />
+							<DashboardCandCandidaturesView
+								candidacies={candidacies}
+								onCandidacyDeleted={(id) => setCandidacies((prev) => prev.filter((c) => c._id !== id))}
+							/>
 						) : selectedView === 'entretiens' ? (
 							<DashboardCandInterviewsView
 								interviews={candidateInterviews}
