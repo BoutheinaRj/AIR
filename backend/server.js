@@ -2157,14 +2157,14 @@ app.post('/api/cv/generated', async (req, res) => {
       },
     });
 
+    // Fire-and-forget extraction côté candidat
+    triggerCvExtractionAsync(created).catch(() => {});
+
     return res.status(200).json({
       success: true,
       message: 'CV généré et enregistré avec succès.',
       cv: created,
     });
-
-    // Fire-and-forget extraction côté candidat
-    triggerCvExtractionAsync(created).catch(() => {});
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -4214,54 +4214,60 @@ app.get('/api/candidacies/scores/:jobOfferId', async (req, res) => {
         .lean(),
     ]);
 
-    const scores = await Promise.all(
+    const scores = (await Promise.all(
       candidacies.map(async (candidacy) => {
-        const candidate = candidacy.candidateId && typeof candidacy.candidateId === 'object' ? candidacy.candidateId : {};
-        const candidateId = String(candidate._id || candidacy.candidateId || '');
-        const quizScorePercent = candidacy.quizAttemptId?.scorePercent ?? candidacy.quizScore ?? null;
+        try {
+          const candidate = candidacy.candidateId && typeof candidacy.candidateId === 'object' ? candidacy.candidateId : {};
+          const candidateId = String(candidate._id || candidacy.candidateId || '');
+          if (!candidateId || !mongoose.Types.ObjectId.isValid(candidateId)) return null;
+          const quizScorePercent = candidacy.quizAttemptId?.scorePercent ?? candidacy.quizScore ?? null;
 
-        const cvDoc = await CV.findOne({ candidateId }).sort({ isActive: -1, createdAt: -1 }).select('extraction').lean();
-        const cvExtraction = cvDoc?.extraction || null;
+          const cvDoc = await CV.findOne({ candidateId }).sort({ isActive: -1, createdAt: -1 }).select('extraction').lean();
+          const cvExtraction = cvDoc?.extraction || null;
 
-        const result = await computeCandidacyScore({
-          candidacy,
-          offer,
-          candidate,
-          cvExtraction,
-          quizScorePercent,
-          certifRefs,
-          educationRefs,
-        });
+          const result = await computeCandidacyScore({
+            candidacy,
+            offer,
+            candidate,
+            cvExtraction,
+            quizScorePercent,
+            certifRefs,
+            educationRefs,
+          });
 
-        // Sauvegarder en BD
-        await CandidacyScore.findOneAndUpdate(
-          { candidacyId: candidacy._id },
-          {
-            $set: {
-              candidateId,
-              jobOfferId,
-              ...result,
-              computedAt: new Date(),
+          // Sauvegarder en BD
+          await CandidacyScore.findOneAndUpdate(
+            { candidacyId: candidacy._id },
+            {
+              $set: {
+                candidateId,
+                jobOfferId,
+                ...result,
+                computedAt: new Date(),
+              },
             },
-          },
-          { upsert: true, new: true }
-        );
+            { upsert: true, new: true }
+          );
 
-        return {
-          candidacyId: String(candidacy._id),
-          candidateId,
-          candidate: {
-            firstName: candidate.firstName || '',
-            lastName: candidate.lastName || '',
-            email: candidate.email || '',
-            professionalTitle: candidate.professionalTitle || '',
-            experienceLevel: candidate.experienceLevel || '',
-          },
-          quizAttempt: candidacy.quizAttemptId || null,
-          ...result,
-        };
+          return {
+            candidacyId: String(candidacy._id),
+            candidateId,
+            candidate: {
+              firstName: candidate.firstName || '',
+              lastName: candidate.lastName || '',
+              email: candidate.email || '',
+              professionalTitle: candidate.professionalTitle || '',
+              experienceLevel: candidate.experienceLevel || '',
+            },
+            quizAttempt: candidacy.quizAttemptId || null,
+            ...result,
+          };
+        } catch (itemErr) {
+          console.error('[scores] candidacy error:', candidacy._id, itemErr?.message);
+          return null;
+        }
       })
-    );
+    )).filter(Boolean);
 
     // Trier par score final décroissant
     scores.sort((a, b) => b.finalScore - a.finalScore);
