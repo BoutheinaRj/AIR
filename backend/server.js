@@ -874,7 +874,10 @@ const connectDB = async () => {
     if (!MONGODB_URI) {
       throw new Error('MONGODB_URI is missing. Add it to backend/.env or project root .env');
     }
-    await mongoose.connect(MONGODB_URI);
+    await mongoose.connect(MONGODB_URI).then(() => {
+    console.log("Connected DB:", mongoose.connection.name) // ✅ HERE
+  })
+  .catch(err => console.error(err));
     console.log('MongoDB connected');
     return true;
   } catch (error) {
