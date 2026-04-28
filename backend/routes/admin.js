@@ -39,6 +39,14 @@ async function loadTrainingCounts(trainingIds) {
   return new Map(counts.map((entry) => [String(entry._id), entry.count]));
 }
 
+function normalizeStatusCounts(rows, expectedStatuses = []) {
+  const counts = Object.fromEntries(expectedStatuses.map((status) => [status, 0]));
+  rows.forEach((row) => {
+    if (row?._id != null) counts[String(row._id)] = row.count;
+  });
+  return counts;
+}
+
 function normalizeTags(tags) {
   if (Array.isArray(tags)) {
     return tags.map((tag) => String(tag || '').trim()).filter(Boolean);
@@ -100,7 +108,9 @@ router.post('/seed', async (req, res) => {
 router.get('/stats', requireAdmin, async (req, res) => {
   try {
     const [totalRecruiters, totalCandidates, totalOffers, totalCandidacies,
-      totalTrainings, feedbackCount, avgFeedbackRaw, scoredCandidacies, recentRecruiters, recentCandidates] =
+      totalTrainings, feedbackCount, avgFeedbackRaw, scoredCandidacies,
+      recentRecruiters, recentCandidates,
+      candidacyStatusCountsRaw, offerStatusCountsRaw, trainingStatusCountsRaw, trainingApplicationStatusCountsRaw] =
       await Promise.all([
         Recruiter.countDocuments(),
         Candidate.countDocuments(),
@@ -112,6 +122,10 @@ router.get('/stats', requireAdmin, async (req, res) => {
         Candidacy.countDocuments({ sbertScore: { $ne: null } }),
         Recruiter.find().sort({ createdAt: -1 }).limit(30).select('firstName lastName email company createdAt').lean(),
         Candidate.find().sort({ createdAt: -1 }).limit(30).select('firstName lastName email createdAt').lean(),
+        Candidacy.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+        JobOffer.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+        TrainingPath.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+        TrainingApplication.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
       ]);
 
     const since14 = new Date();
@@ -136,6 +150,12 @@ router.get('/stats', requireAdmin, async (req, res) => {
         totalTrainings,
         feedbackCount, avgRating: avgFeedbackRaw[0]?.avg ? Number(avgFeedbackRaw[0].avg.toFixed(2)) : null,
         scoredCandidacies, trendLabels, trendValues, recentRecruiters, recentCandidates },
+      pipeline: {
+        candidacies: normalizeStatusCounts(candidacyStatusCountsRaw, ['applied', 'reviewed', 'accepted', 'rejected']),
+        offers: normalizeStatusCounts(offerStatusCountsRaw, ['draft', 'published']),
+        trainings: normalizeStatusCounts(trainingStatusCountsRaw, ['draft', 'published']),
+        trainingApplications: normalizeStatusCounts(trainingApplicationStatusCountsRaw, ['applied', 'accepted', 'rejected', 'withdrawn']),
+      },
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Erreur serveur.' });

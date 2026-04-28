@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import { assets } from '../assets/assets'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+const ADMIN_REFRESH_MS = 45_000
 
 // ─── Sparkline SVG ────────────────────────────────────────────────────────────
 function Sparkline({ values = [] }) {
@@ -33,16 +34,178 @@ function Sparkline({ values = [] }) {
   )
 }
 
-// ─── Stat card ────────────────────────────────────────────────────────────────
-function StatCard({ label, value, sub, trend }) {
+function TrendPanel({ title, subtitle, values = [], labels = [], accent = '#06d5e0' }) {
+  const width = 560
+  const height = 300
+  const padding = { top: 20, right: 24, bottom: 42, left: 24 }
+  const safeValues = Array.isArray(values) ? values.map((value) => (Number.isFinite(value) ? value : 0)) : []
+  const max = Math.max(1, ...safeValues)
+  const innerW = width - padding.left - padding.right
+  const innerH = height - padding.top - padding.bottom
+  const stepX = safeValues.length > 1 ? innerW / (safeValues.length - 1) : innerW
+  const points = safeValues.map((value, index) => {
+    const x = padding.left + index * stepX
+    const y = padding.top + innerH - (value / max) * innerH
+    return `${x},${y}`
+  }).join(' ')
+  const area = safeValues.length ? `M ${padding.left},${padding.top + innerH} L ${points} L ${padding.left + innerW},${padding.top + innerH} Z` : ''
+
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_12px_34px_rgba(8,51,93,0.07),0_0_0_1px_rgba(14,165,233,0.28),0_0_22px_rgba(6,182,212,0.24)]">
+    <div className="h-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.2)] md:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[#5b7f9d]">{title}</p>
+          <p className="mt-1 text-lg font-black text-[#0d355b]">{subtitle}</p>
+        </div>
+        <Badge label={`max ${max}`} color="cyan" />
+      </div>
+
+      <div className="mt-4 overflow-x-auto">
+        <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[480px]">
+          <defs>
+            <linearGradient id="adminTrendArea" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={accent} stopOpacity="0.32" />
+              <stop offset="100%" stopColor={accent} stopOpacity="0.04" />
+            </linearGradient>
+          </defs>
+          <line x1={padding.left} y1={padding.top + innerH} x2={padding.left + innerW} y2={padding.top + innerH} stroke="#e2e8f0" strokeWidth="1" />
+          {area ? <path d={area} fill="url(#adminTrendArea)" /> : null}
+          {points ? <polyline fill="none" stroke={accent} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" points={points} /> : null}
+          {safeValues.map((value, index) => {
+            const x = padding.left + index * stepX
+            const y = padding.top + innerH - (value / max) * innerH
+            return (
+              <g key={`${title}-${labels[index] || index}`}>
+                <circle cx={x} cy={y} r="4.5" fill={accent} stroke="#fff" strokeWidth="2" />
+                {index % 2 === 0 ? (
+                  <text x={x} y={height - 10} textAnchor="middle" fontSize="10" fill="#64748b">
+                    {labels[index] || ''}
+                  </text>
+                ) : null}
+              </g>
+            )
+          })}
+        </svg>
+      </div>
+    </div>
+  )
+}
+
+// ─── Stat card ────────────────────────────────────────────────────────────────
+function StatCard({ label, value, sub, trend, large = false, highlight = false }) {
+  return (
+    <div className={`relative h-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_12px_34px_rgba(8,51,93,0.07),0_0_0_1px_rgba(14,165,233,0.28),0_0_22px_rgba(6,182,212,0.24)] ${large ? 'min-h-[200px] md:min-h-[224px]' : 'min-h-[138px] md:min-h-[154px]'}`}>
       <div className="h-1.5 bg-gradient-to-r from-[#0ea5e9] via-[#06b6d4] to-[#1d4ed8]" />
-      <div className="p-4">
+      {highlight && (
+        <div className="absolute right-3 top-3 rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-semibold text-[#045d7a]">Clé</div>
+      )}
+      <div className="flex h-full flex-col p-3.5 md:p-4">
         <p className="text-[11px] font-black uppercase tracking-[0.16em] text-[#5b7f9d]">{label}</p>
-        <p className="mt-2 text-3xl font-black text-slate-900">{value ?? '—'}</p>
+        <p className={`${large ? 'mt-3 text-4xl md:mt-4 md:text-5xl' : 'mt-2 text-[1.8rem] md:text-3xl'} font-black text-slate-900`}>{value ?? '—'}</p>
         {sub && <p className="mt-1 text-xs text-[#5b7f9d]">{sub}</p>}
-        {trend && <div className="mt-3 h-10"><Sparkline values={trend} /></div>}
+        {trend && <div className="mt-auto pt-3 h-10"><Sparkline values={trend} /></div>}
+      </div>
+    </div>
+  )
+}
+
+function InsightPanel({ title, subtitle, items = [], tone = 'cyan' }) {
+  const toneClasses = {
+    cyan: 'from-[#f7fcff] to-[#eef8ff]',
+    amber: 'from-[#fffaf0] to-[#fff3d6]',
+    emerald: 'from-[#f2fbf7] to-[#e8f9f0]',
+    slate: 'from-[#f8fafc] to-[#edf2f7]',
+  }
+
+  return (
+    <div className={`h-full overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br ${toneClasses[tone] || toneClasses.cyan} p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.2)] md:p-5`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[#5b7f9d]">{title}</p>
+          <p className="mt-1 text-lg font-black text-[#0d355b]">{subtitle}</p>
+        </div>
+        <Badge label={`${items.length} points`} color={tone === 'amber' ? 'amber' : tone === 'emerald' ? 'green' : tone === 'slate' ? 'slate' : 'cyan'} />
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {items.map((item) => (
+          <div key={item.label} className="rounded-xl border border-white/70 bg-white/85 px-3 py-2 shadow-[0_8px_18px_rgba(8,51,93,0.04)]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-[#103b62]">{item.label}</p>
+                {item.description ? <p className="text-xs text-[#587a99]">{item.description}</p> : null}
+              </div>
+              <span className={`rounded-full px-2 py-[2px] text-[11px] font-semibold ${item.variant === 'danger' ? 'bg-red-50 text-red-700' : item.variant === 'success' ? 'bg-emerald-50 text-emerald-700' : item.variant === 'warning' ? 'bg-amber-50 text-amber-700' : item.variant === 'neutral' ? 'bg-slate-50 text-slate-700' : 'bg-cyan-50 text-cyan-700'}`}>
+                {item.value}
+              </span>
+            </div>
+          </div>
+        ))}
+        {!items.length && <p className="text-sm text-[#8aa3b9]">Aucun point à signaler.</p>}
+      </div>
+    </div>
+  )
+}
+
+function ActivityPanel({ title, subtitle, items = [] }) {
+  return (
+    <div className="h-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.2)] md:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[#5b7f9d]">{title}</p>
+          <p className="mt-1 text-lg font-black text-[#0d355b]">{subtitle}</p>
+        </div>
+        <Badge label="Live" color="green" />
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {items.map((item) => (
+          <div key={`${item.label}-${item.detail || item.date || ''}`} className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2.5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-[#103b62]">{item.label}</p>
+                <p className="text-xs text-[#587a99]">{item.detail}</p>
+              </div>
+              <span className="text-xs text-[#8aa3b9]">{item.date}</span>
+            </div>
+          </div>
+        ))}
+        {!items.length && <p className="text-sm text-[#8aa3b9]">Aucune activité récente.</p>}
+      </div>
+    </div>
+  )
+}
+
+function PipelineCard({ title, subtitle, steps = [] }) {
+  const total = steps.reduce((sum, step) => sum + Number(step.count || 0), 0)
+  return (
+    <div className="h-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.2)] md:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[#5b7f9d]">{title}</p>
+          <p className="mt-1 text-lg font-black text-[#0d355b]">{subtitle}</p>
+        </div>
+        <span className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-[11px] font-semibold text-[#0a5f88]">
+          {total} total
+        </span>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {steps.map((step) => {
+          const count = Number(step.count || 0)
+          const width = total && count > 0 ? `${Math.max(6, (count / total) * 100)}%` : '0%'
+          return (
+            <div key={step.label}>
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-semibold text-[#103b62]">{step.label}</span>
+                <span className="text-xs font-black text-[#5b7f9d]">{count}</span>
+              </div>
+              <div className="mt-2 h-2 rounded-full bg-slate-100">
+                <div className="h-2 rounded-full transition-all" style={{ width, background: step.color }} />
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -108,9 +271,12 @@ export default function DashboardAdmin() {
   const [admin, setAdmin]     = useState(null)
   const [view, setView]       = useState('overview')
   const [search, setSearch]   = useState('')
+  const [lastSyncedAt, setLastSyncedAt] = useState(null)
+  const [currentTime, setCurrentTime]   = useState(new Date())
 
   const [stats, setStats]               = useState(null)
   const [statsLoading, setStatsLoading] = useState(false)
+  const [pipeline, setPipeline]         = useState(null)
   const [recruiters, setRecruiters]     = useState([])
   const [candidates, setCandidates]     = useState([])
   const [offers, setOffers]             = useState([])
@@ -152,18 +318,29 @@ export default function DashboardAdmin() {
     setTimeout(() => { setError(''); setSuccess('') }, 4000)
   }, [])
 
-  // Load stats once
-  useEffect(() => {
-    if (!admin) return
+  const loadOverview = useCallback(async () => {
     setStatsLoading(true)
-    apiFetch('/stats').then(d => setStats(d.stats)).catch(e => flash(e.message, true)).finally(() => setStatsLoading(false))
-  }, [admin, apiFetch, flash])
+    try {
+      const data = await apiFetch('/stats')
+      setStats(data.stats)
+      setPipeline(data.pipeline || null)
+      setLastSyncedAt(new Date())
+    } catch (e) {
+      flash(e.message, true)
+    } finally {
+      setStatsLoading(false)
+    }
+  }, [apiFetch, flash])
 
-  // Load section data on view change
-  useEffect(() => {
-    if (!admin || view === 'overview') return
+  const loadSection = useCallback(async (targetView, { resetSearch = false } = {}) => {
+    if (targetView === 'overview') {
+      await loadOverview()
+      return
+    }
+
     setLoading(true)
-    setSearch('')
+    if (resetSearch) setSearch('')
+
     const map = {
       recruiters:  () => apiFetch('/recruiters').then(d => setRecruiters(d.recruiters)),
       candidates:  () => apiFetch('/candidates').then(d => setCandidates(d.candidates)),
@@ -172,8 +349,35 @@ export default function DashboardAdmin() {
       candidacies: () => apiFetch('/candidacies').then(d => setCandidacies(d.candidacies)),
       feedback:    () => apiFetch('/feedback').then(d => setFeedbacks(d.feedbacks)),
     }
-    map[view]?.().catch(e => flash(e.message, true)).finally(() => setLoading(false))
-  }, [view, admin]) // eslint-disable-line
+
+    try {
+      await map[targetView]?.()
+      setLastSyncedAt(new Date())
+    } catch (e) {
+      flash(e.message, true)
+    } finally {
+      setLoading(false)
+    }
+  }, [apiFetch, flash, loadOverview])
+
+  useEffect(() => {
+    if (!admin) return
+    loadSection(view, { resetSearch: true })
+  }, [admin, view, loadSection])
+
+  useEffect(() => {
+    if (!admin) return
+    const interval = setInterval(() => {
+      loadSection(view, { resetSearch: false })
+    }, ADMIN_REFRESH_MS)
+
+    return () => clearInterval(interval)
+  }, [admin, view, loadSection])
+
+  useEffect(() => {
+    const interval = setInterval(() => setCurrentTime(new Date()), 1000)
+    return () => clearInterval(interval)
+  }, [])
 
   const fmt = (iso) => iso ? new Date(iso).toLocaleDateString('fr-FR') : '—'
 
@@ -190,6 +394,7 @@ export default function DashboardAdmin() {
       await apiFetch(`${endpoint}/${id}`, { method: 'DELETE' })
       setter(prev => prev.filter(x => x._id !== id))
       flash('Supprimé avec succès.')
+      void loadOverview()
     } catch (e) { flash(e.message, true) }
   }
 
@@ -200,6 +405,7 @@ export default function DashboardAdmin() {
       const setter = type === 'recruiters' ? setRecruiters : setCandidates
       setter(prev => prev.map(x => x._id === item._id ? { ...x, banned: !item.banned } : x))
       flash(item.banned ? 'Utilisateur débanni.' : 'Utilisateur banni.')
+      void loadOverview()
     } catch (e) { flash(e.message, true) }
   }
 
@@ -213,6 +419,7 @@ export default function DashboardAdmin() {
       })
       flash('Avertissement envoyé par email.')
       setModal(null); setWarningMsg('')
+      void loadOverview()
     } catch (e) { flash(e.message, true) }
     finally { setSaving(false) }
   }
@@ -234,6 +441,7 @@ export default function DashboardAdmin() {
       }
       flash('Modifications enregistrées.')
       setModal(null)
+      void loadOverview()
     } catch (e) { flash(e.message, true) }
     finally { setSaving(false) }
   }
@@ -256,24 +464,123 @@ export default function DashboardAdmin() {
   const openWarn = (type, item) => { setWarningMsg(''); setModal({ type: `warn-${type}`, data: item }) }
 
   const adminName = admin ? `${admin.firstName || ''} ${admin.lastName || ''}`.trim() || admin.email : ''
+  const syncLabel = lastSyncedAt
+    ? lastSyncedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : 'jamais'
+
+  const overviewCandidacyStages = [
+    { label: 'Appliquées', count: pipeline?.candidacies?.applied ?? 0, color: '#06d5e0' },
+    { label: 'En revue', count: pipeline?.candidacies?.reviewed ?? 0, color: '#0ea5e9' },
+    { label: 'Acceptées', count: pipeline?.candidacies?.accepted ?? 0, color: '#1d4ed8' },
+    { label: 'Refusées', count: pipeline?.candidacies?.rejected ?? 0, color: '#ef4444' },
+  ]
+
+  const overviewOfferStages = [
+    { label: 'Publiées', count: pipeline?.offers?.published ?? 0, color: '#10b981' },
+    { label: 'Brouillons', count: pipeline?.offers?.draft ?? 0, color: '#94a3b8' },
+  ]
+
+  const overviewTrainingStages = [
+    { label: 'Déposées', count: pipeline?.trainingApplications?.applied ?? 0, color: '#06b6d4' },
+    { label: 'Acceptées', count: pipeline?.trainingApplications?.accepted ?? 0, color: '#22c55e' },
+    { label: 'Refusées', count: pipeline?.trainingApplications?.rejected ?? 0, color: '#ef4444' },
+    { label: 'Retirées', count: pipeline?.trainingApplications?.withdrawn ?? 0, color: '#64748b' },
+  ]
+
+  const adminJourneyStages = [
+    { label: 'Créées', count: stats?.totalOffers ?? 0, color: '#0ea5e9' },
+    { label: 'Candidatures', count: stats?.totalCandidacies ?? 0, color: '#06d5e0' },
+    { label: 'SBERT scorées', count: stats?.scoredCandidacies ?? 0, color: '#1d4ed8' },
+    { label: 'Feedback', count: stats?.feedbackCount ?? 0, color: '#10b981' },
+  ]
+
+  const adminAlerts = [
+    {
+      label: 'Candidatures à traiter',
+      value: `${Math.max(0, Number(stats?.totalCandidacies || 0) - Number(stats?.scoredCandidacies || 0))}`,
+      description: 'Candidatures non scorées ou non revues',
+      variant: Number(stats?.totalCandidacies || 0) > Number(stats?.scoredCandidacies || 0) ? 'warning' : 'success',
+    },
+    {
+      label: 'Offres en brouillon',
+      value: `${pipeline?.offers?.draft ?? 0}`,
+      description: 'Publications non encore visibles côté candidats',
+      variant: (pipeline?.offers?.draft ?? 0) > 0 ? 'warning' : 'success',
+    },
+    {
+      label: 'Formations actives',
+      value: `${pipeline?.trainings?.published ?? 0}`,
+      description: 'Parcours de formation disponibles dans la base',
+      variant: 'cyan',
+    },
+    {
+      label: 'Feedbacks reçus',
+      value: `${stats?.feedbackCount ?? 0}`,
+      description: 'Retour utilisateur sur l’application',
+      variant: Number(stats?.feedbackCount || 0) > 0 ? 'success' : 'warning',
+    },
+  ]
+
+  const adminActivity = [
+    ...(stats?.recentRecruiters || []).slice(0, 3).map((recruiter) => ({
+      label: `${recruiter.firstName || ''} ${recruiter.lastName || ''}`.trim() || recruiter.email,
+      detail: recruiter.company || recruiter.email,
+      date: fmt(recruiter.createdAt),
+    })),
+    ...(stats?.recentCandidates || []).slice(0, 3).map((candidate) => ({
+      label: `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || candidate.email,
+      detail: candidate.email,
+      date: fmt(candidate.createdAt),
+    })),
+  ].slice(0, 5)
+
+  const totalCandidacies = Number(stats?.totalCandidacies || 0)
+  const scoredCandidacies = Number(stats?.scoredCandidacies || 0)
+  const reviewedCandidacies = Number(pipeline?.candidacies?.reviewed || 0)
+  const acceptedCandidacies = Number(pipeline?.candidacies?.accepted || 0)
+  const rejectedCandidacies = Number(pipeline?.candidacies?.rejected || 0)
+  const publishedOffers = Number(pipeline?.offers?.published || 0)
+  const draftOffers = Number(pipeline?.offers?.draft || 0)
+  const totalOffersFlow = publishedOffers + draftOffers
+  const trainingApplied = Number(pipeline?.trainingApplications?.applied || 0)
+  const trainingAccepted = Number(pipeline?.trainingApplications?.accepted || 0)
+
+  const pendingCandidacies = Math.max(0, totalCandidacies - scoredCandidacies)
+  const scoringRate = totalCandidacies > 0 ? Math.round((scoredCandidacies / totalCandidacies) * 100) : 0
+  const publicationRate = totalOffersFlow > 0 ? Math.round((publishedOffers / totalOffersFlow) * 100) : 0
+  const trainingAcceptanceRate = trainingApplied > 0 ? Math.round((trainingAccepted / trainingApplied) * 100) : 0
+
+  const processingRateValues = [
+    totalCandidacies > 0 ? Math.round((scoredCandidacies / totalCandidacies) * 100) : 0,
+    totalCandidacies > 0 ? Math.round((reviewedCandidacies / totalCandidacies) * 100) : 0,
+    totalCandidacies > 0 ? Math.round((acceptedCandidacies / totalCandidacies) * 100) : 0,
+    totalCandidacies > 0 ? Math.round((rejectedCandidacies / totalCandidacies) * 100) : 0,
+  ]
+
+  const capacityTrendValues = [
+    Number(pipeline?.offers?.published || 0),
+    Number(pipeline?.offers?.draft || 0),
+    Number(pipeline?.trainings?.published || 0),
+    Number(pipeline?.trainingApplications?.applied || 0),
+  ]
 
   if (!admin) return null
 
   return (
     <section
-      className="bg-gradient-to-br from-[#eaf8ff] via-[#f3fbff] to-[#eef4ff]"
+      className="candidate-dashboard h-screen bg-gradient-to-br from-[#eaf8ff] via-[#f3fbff] to-[#eef4ff]"
       style={{
         fontFamily: "'Jost', sans-serif",
         position: 'fixed',
         inset: 0,
-        overflow: 'hidden',
+        overflow: 'auto',
         zIndex: 9999,
       }}
     >
-      <div className="flex h-full w-full">
+      <div className="flex h-full min-h-0 w-full">
 
         {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-        <aside className="w-[286px] shrink-0 bg-gradient-to-b from-[#051a3d] via-[#072a56] to-[#083d69] px-4 py-6 text-white flex flex-col overflow-y-auto h-full">
+        <aside className="candidate-dashboard__sidebar flex h-full self-stretch w-[286px] shrink-0 flex-col overflow-y-auto bg-gradient-to-b from-[#051a3d] via-[#072a56] to-[#083d69] px-4 py-6 text-white">
           <div className="mb-2 flex items-center justify-center px-2">
             <button
               type="button"
@@ -285,7 +592,7 @@ export default function DashboardAdmin() {
             </button>
           </div>
 
-          <div className="mb-6 flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
+          <div className="mb-6 flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 shadow-[0_12px_28px_rgba(0,0,0,0.2),0_0_0_1px_rgba(255,255,255,0.03),0_0_18px_rgba(6,182,212,0.28)]">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#00d4ff] to-[#1f7bff] text-base font-black">
               {(admin.firstName?.[0] || 'A').toUpperCase()}
             </div>
@@ -322,24 +629,42 @@ export default function DashboardAdmin() {
         </aside>
 
         {/* ── Main ────────────────────────────────────────────────────────── */}
-        <main className="flex-1 overflow-y-auto p-6 h-full">
-          <div className="rounded-3xl border border-[#cfe7f9] bg-white p-6 shadow-[0_15px_40px_rgba(8,51,93,0.08)]">
+        <main className="flex-1 h-full min-h-0 overflow-y-auto p-6">
+          <div className="candidate-dashboard__panel min-h-full w-full rounded-3xl border border-[#cfe7f9] bg-white p-6 shadow-[0_15px_40px_rgba(8,51,93,0.08)]">
 
-            {/* Header */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <p className="text-4xl font-black text-[#000000]">{VIEW_LABELS[view]}</p>
-                <p className="mt-1 text-base text-[#36648b]">
-                  {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-                </p>
+            {/* Header (rendered outside overview only) */}
+            {view !== 'overview' ? (
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-4xl font-black text-[#000000]">{VIEW_LABELS[view]}</p>
+                  <p className="mt-1 text-base text-[#36648b]">
+                    {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="candidate-dashboard__time inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-semibold text-[#0a5f88]">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-[#06d5e0]" />
+                    {currentTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} · sync {syncLabel}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => loadSection(view, { resetSearch: false })}
+                    className="candidate-dashboard__ghost-btn rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Actualiser
+                  </button>
+                </div>
               </div>
-              {view !== 'overview' && (
+            ) : null}
+
+            {view !== 'overview' && (
+              <div className="mt-4 flex justify-end">
                 <input value={search} onChange={e => setSearch(e.target.value)}
                   placeholder="Rechercher..."
-                  className="w-56 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-500"
+                  className="w-full max-w-sm rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-500"
                 />
-              )}
-            </div>
+              </div>
+            )}
 
             {/* Flash */}
             {error   && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -349,68 +674,145 @@ export default function DashboardAdmin() {
 
             {/* ── OVERVIEW ────────────────────────────────────────────── */}
             {view === 'overview' && (
-              <div className="mt-6 space-y-5">
+              <div className="mt-6 space-y-6 lg:space-y-7">
                 {statsLoading ? <p className="text-sm text-[#4f7191]">Chargement des statistiques...</p> : stats ? (
                   <>
-                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                      <StatCard label="Recruteurs"      value={stats.totalRecruiters} />
-                      <StatCard label="Candidats"       value={stats.totalCandidates} />
-                      <StatCard label="Offres publiées" value={stats.totalOffers} />
-                      <StatCard label="Candidatures"    value={stats.totalCandidacies} sub={`${stats.scoredCandidacies} scorées SBERT`} />
-                    </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <StatCard label="Candidatures / 14 jours"
-                        value={stats.trendValues?.reduce((a, b) => a + b, 0) ?? 0}
-                        sub="Total sur les 14 derniers jours" trend={stats.trendValues}
-                      />
-                      <StatCard label="Note moyenne app"
-                        value={stats.avgRating ? `${stats.avgRating}/5` : '—'}
-                        sub={`${stats.feedbackCount} avis déposés`}
-                      />
-                    </div>
+                    <div className="rounded-[28px] border border-[#d8eaf8] bg-gradient-to-br from-[#f8fdff] via-[#fbfeff] to-[#eef7ff] p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.12)] md:p-5 lg:p-6">
+                      <div className="flex flex-wrap items-start justify-between gap-3 md:gap-4">
+                        <div>
+                          <p className="text-3xl font-black text-[#000000] md:text-4xl">{VIEW_LABELS[view]}</p>
+                          <p className="mt-1 text-base text-[#36648b]">
+                            {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="candidate-dashboard__time inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-semibold text-[#0a5f88]">
+                            <span className="h-2 w-2 animate-pulse rounded-full bg-[#06d5e0]" />
+                            {currentTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} · sync {syncLabel}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => loadSection(view, { resetSearch: false })}
+                            className="candidate-dashboard__ghost-btn rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            Actualiser
+                          </button>
+                        </div>
+                      </div>
 
-                    {/* Bar chart */}
-                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.2)]">
-                      <p className="mb-4 text-[11px] font-black uppercase tracking-[0.14em] text-[#5b7f9d]">
-                        Candidatures — 14 derniers jours
-                      </p>
-                      <div className="flex items-end gap-1" style={{ height: 80 }}>
-                        {(stats.trendValues || []).map((v, i) => {
-                          const max = Math.max(1, ...stats.trendValues)
-                          const h = Math.max(2, (v / max) * 72)
-                          return (
-                            <div key={i} className="group flex flex-1 flex-col items-center justify-end">
-                              <div className="w-full rounded-t transition-all group-hover:opacity-70"
-                                style={{ height: h, background: v > 0 ? '#06d5e0' : '#e2e8f0' }} />
-                              <p className="mt-1 text-[8px] text-[#5b7f9d]">{stats.trendLabels?.[i]?.slice(0, 5)}</p>
-                            </div>
-                          )
-                        })}
+                      <div className="mt-5 grid gap-3 md:gap-4 sm:grid-cols-2 xl:grid-cols-4 items-stretch">
+                        <StatCard label="Recruteurs"      value={stats.totalRecruiters} />
+                        <StatCard label="Candidats"       value={stats.totalCandidates} />
+                        <StatCard label="Offres publiées" value={stats.totalOffers} />
+                        <StatCard label="Candidatures"    value={stats.totalCandidacies} sub={`${stats.scoredCandidacies} scorées SBERT`} />
+                      </div>
+
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                          <p className="text-[11px] font-black uppercase tracking-[0.14em] text-amber-700">A traiter</p>
+                          <p className="mt-1 text-2xl font-black text-amber-900">{pendingCandidacies}</p>
+                          <p className="text-xs text-amber-700">candidatures en attente</p>
+                        </div>
+                        <div className="rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3">
+                          <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-700">Taux scoring</p>
+                          <p className="mt-1 text-2xl font-black text-cyan-900">{scoringRate}%</p>
+                          <p className="text-xs text-cyan-700">couverture du scoring</p>
+                        </div>
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                          <p className="text-[11px] font-black uppercase tracking-[0.14em] text-emerald-700">Offres publiées</p>
+                          <p className="mt-1 text-2xl font-black text-emerald-900">{publicationRate}%</p>
+                          <p className="text-xs text-emerald-700">vs brouillons</p>
+                        </div>
+                        <div className="rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3">
+                          <p className="text-[11px] font-black uppercase tracking-[0.14em] text-indigo-700">Acceptation formation</p>
+                          <p className="mt-1 text-2xl font-black text-indigo-900">{trainingAcceptanceRate}%</p>
+                          <p className="text-xs text-indigo-700">demandes validées</p>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Recent users */}
-                    <div className="grid gap-4 xl:grid-cols-2">
-                      {[
-                        ['Derniers recruteurs inscrits', stats.recentRecruiters,
-                          r => `${r.firstName || ''} ${r.lastName || ''}`.trim() || '—', r => r.company || r.email],
-                        ['Derniers candidats inscrits', stats.recentCandidates,
-                          r => `${r.firstName || ''} ${r.lastName || ''}`.trim() || '—', r => r.email],
-                      ].map(([title, rows, name, sub]) => (
-                        <div key={title} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.2)]">
-                          <p className="mb-3 text-[11px] font-black uppercase tracking-[0.14em] text-[#5b7f9d]">{title}</p>
-                          {(rows || []).slice(0, 5).map(r => (
-                            <div key={r._id} className="flex items-center justify-between border-b border-slate-100 py-2 last:border-0">
-                              <div>
-                                <p className="text-sm font-bold text-[#103b62]">{name(r)}</p>
-                                <p className="text-xs text-[#587a99]">{sub(r)}</p>
-                              </div>
-                              <p className="text-xs text-[#8aa3b9]">{fmt(r.createdAt)}</p>
-                            </div>
-                          ))}
-                          {!(rows || []).length && <p className="text-sm text-[#8aa3b9]">Aucun.</p>}
+                    <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+                      <div className="space-y-4 lg:space-y-5">
+                        <TrendPanel
+                          title="Courbe admin"
+                          subtitle="Activité opérationnelle sur 14 jours"
+                          values={stats.trendValues}
+                          labels={stats.trendLabels}
+                          accent="#06d5e0"
+                        />
+
+                        <div className="grid gap-4 xl:grid-cols-2 items-stretch">
+                          <TrendPanel
+                            title="Performance de traitement"
+                            subtitle="Taux de scoring et de décision (%)"
+                            values={processingRateValues}
+                            labels={['Scoring', 'Revue', 'Acceptées', 'Refusées']}
+                            accent="#1d4ed8"
+                          />
+                          <TrendPanel
+                            title="Capacité plateforme"
+                            subtitle="Offres et formations en volume"
+                            values={capacityTrendValues}
+                            labels={['Offres publiées', 'Brouillons', 'Formations', 'Demandes']}
+                            accent="#10b981"
+                          />
                         </div>
-                      ))}
+
+                        <div className="grid gap-4 lg:grid-cols-2 items-stretch">
+                          <div>
+                            <StatCard
+                              label="Candidatures / 14 jours"
+                              value={stats.trendValues?.reduce((a, b) => a + b, 0) ?? 0}
+                              sub="Flux réel sur les 14 derniers jours"
+                              trend={stats.trendValues}
+                              large
+                              highlight
+                            />
+                          </div>
+                          <PipelineCard
+                            title="Pipeline candidatures"
+                            subtitle="Du dépôt à la décision"
+                            steps={overviewCandidacyStages}
+                          />
+                        </div>
+
+                        <div className="grid gap-4 md:grid-cols-2 items-stretch">
+                          <PipelineCard
+                            title="Pipeline offres"
+                            subtitle="Cycle de publication"
+                            steps={overviewOfferStages}
+                          />
+                          <PipelineCard
+                            title="Pipeline formations"
+                            subtitle="Demandes d'inscription"
+                            steps={overviewTrainingStages}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-4 lg:space-y-5">
+                        <InsightPanel
+                          title="Priorité admin"
+                          subtitle="Points d’attention immédiats"
+                          items={adminAlerts}
+                          tone="amber"
+                        />
+                        <PipelineCard
+                          title="Lecture admin"
+                          subtitle="Vue transverse du backlog"
+                          steps={adminJourneyStages}
+                        />
+                        <StatCard
+                          label="Note moyenne app"
+                          value={stats.avgRating ? `${stats.avgRating}/5` : '—'}
+                          sub={`${stats.feedbackCount} avis déposés`}
+                        />
+                        <ActivityPanel
+                          title="Activité récente"
+                          subtitle="Nouveaux profils inscrits"
+                          items={adminActivity}
+                        />
+                      </div>
                     </div>
                   </>
                 ) : <p className="text-sm text-[#8aa3b9]">Aucune statistique disponible.</p>}
