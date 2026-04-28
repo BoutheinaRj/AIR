@@ -506,6 +506,76 @@ function DashboardCand() {
 		}
 	}
 
+	const loadCandidateDashboardStats = async (currentCandidateId) => {
+		if (!currentCandidateId) return
+		setDashboardError('')
+		setDashboardLoading(true)
+		try {
+			const res = await fetch(`${API_BASE}/analytics/candidate/${currentCandidateId}/dashboard?days=30`)
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) throw new Error(data?.message || 'Impossible de charger les statistiques')
+			setDashboardStats(data)
+		} catch (e) {
+			setDashboardStats(null)
+			setDashboardError(e?.message || 'Erreur de chargement')
+		} finally {
+			setDashboardLoading(false)
+		}
+	}
+
+	const loadCandidateOfferData = async (currentCandidateId) => {
+		if (!currentCandidateId) return
+		setLoading(true)
+		setLoadError('')
+		setApplyStatus(null)
+		setCvMatchError('')
+		cvMatchSignatureRef.current = ''
+		try {
+			const [jobsRes, candidaciesRes] = await Promise.all([
+				fetch(`${API_BASE}/offers`),
+				fetch(`${API_BASE}/candidacies/${currentCandidateId}`),
+			])
+			const jobsData = await jobsRes.json()
+			const candidaciesData = await candidaciesRes.json()
+			if (jobsRes.ok && jobsData.success) {
+				const formattedJobs = (jobsData.offers || []).map((job) => ({
+					id: job._id,
+					emoji: '💼',
+					title: job.title,
+					company: 'Entreprise',
+					location: job.location,
+					tags: [],
+					type: job.contractType,
+					featured: false,
+					posted: job.createdAt ? new Date(job.createdAt).toLocaleDateString() : 'Récemment',
+					createdAt: job.createdAt || null,
+					salary: job.salary || 'N/A',
+					candidates: 0,
+					closes: 'N/A',
+					desc: job.description,
+					missions: [],
+					cvMatch: [],
+					matchScore: null,
+					workMode: job.workMode,
+				}))
+				setJobs(formattedJobs)
+				if (formattedJobs.length > 0) setSelectedJobId(formattedJobs[0].id)
+			} else {
+				setLoadError(jobsData?.message || "Impossible de charger les offres d'emploi.")
+				setJobs([])
+			}
+			if (candidaciesRes.ok && candidaciesData.success) {
+				setCandidacies(candidaciesData.candidacies || [])
+			}
+		} catch (error) {
+			console.error('Error fetching data:', error)
+			setLoadError('Serveur indisponible. Vérifiez que le backend tourne.')
+			setJobs([])
+		} finally {
+			setLoading(false)
+		}
+	}
+
 	useEffect(() => {
 		const stored = localStorage.getItem('airCandidate')
 		if (!stored) {
@@ -683,29 +753,7 @@ function DashboardCand() {
 		if (!candidateId) return
 		if (selectedView !== 'dashboard') return
 
-		let cancelled = false
-		const run = async () => {
-			try {
-				setDashboardError('')
-				setDashboardLoading(true)
-				const res = await fetch(`${API_BASE}/analytics/candidate/${candidateId}/dashboard?days=30`)
-				const data = await res.json().catch(() => ({}))
-				if (!res.ok || !data?.success) throw new Error(data?.message || 'Impossible de charger les statistiques')
-				if (cancelled) return
-				setDashboardStats(data)
-			} catch (e) {
-				if (cancelled) return
-				setDashboardStats(null)
-				setDashboardError(e?.message || 'Erreur de chargement')
-			} finally {
-				if (!cancelled) setDashboardLoading(false)
-			}
-		}
-
-		run()
-		return () => {
-			cancelled = true
-		}
+		loadCandidateDashboardStats(candidateId).catch(() => {})
 	}, [candidate, selectedView])
 
 	useEffect(() => {
@@ -962,7 +1010,30 @@ function DashboardCand() {
 		navigate('/connecter')
 	}
 
-	const handleRefreshPage = () => {
+	const handleRefreshPage = async () => {
+		const currentCandidateId = candidate?.id || candidate?._id
+		if (!currentCandidateId) return
+
+		if (selectedView === 'dashboard') {
+			await loadCandidateDashboardStats(currentCandidateId)
+			return
+		}
+
+		if (selectedView === 'offres' || selectedView === 'candidatures') {
+			await loadCandidateOfferData(currentCandidateId)
+			return
+		}
+
+		if (selectedView === 'entretiens') {
+			await loadCandidateInterviews(currentCandidateId)
+			return
+		}
+
+		if (selectedView === 'notifications' && typeof fetchNotifications === 'function') {
+			await fetchNotifications()
+			return
+		}
+
 		window.location.reload()
 	}
 
@@ -1519,24 +1590,25 @@ function DashboardCand() {
 							<img src={assets.logo} alt='AIR logo' className='h-28 w-auto object-contain' />
 						</button>
 					</div>
-					<div className='rounded-2xl border border-white/20 bg-white/10 px-3 py-2 backdrop-blur-sm shadow-[0_8px_20px_rgba(0,0,0,0.18)]'>
+
+					<div className='mb-6 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 shadow-[0_12px_28px_rgba(0,0,0,0.2),0_0_0_1px_rgba(255,255,255,0.03),0_0_18px_rgba(6,182,212,0.28)]'>
 						<div className='flex items-center gap-3'>
-						<div className='h-12 w-12 overflow-hidden rounded-full bg-gradient-to-br from-[#00d4ff] to-[#1f7bff]'>
 							{candidate?.profileImage ? (
-								<img src={candidate.profileImage} alt='Profil' className='h-full w-full object-cover' />
+								<img src={candidate.profileImage} alt='Profil candidat' className='h-12 w-12 rounded-full object-cover ring-2 ring-cyan-300/40' />
 							) : (
-								<div className='flex h-full w-full items-center justify-center text-base font-bold text-white'>{candidateInitials}</div>
+								<div className='flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-[#00d4ff] to-[#1f7bff] text-base font-bold'>
+									{candidateInitials}
+								</div>
 							)}
-						</div>
-						<div className='min-w-0'>
-							<p className='truncate text-[19px] leading-5 font-bold text-white'>{candidateName}</p>
-							<div className='mt-1 flex items-center gap-2'>
-								<span className='truncate text-xs text-cyan-100/90'>{candidateTitle}</span>
-								<span className='shrink-0 rounded-full bg-cyan-100 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-wide text-[#045d7a]'>
-									Candidat
-								</span>
+							<div className='min-w-0'>
+								<p className='truncate text-[19px] leading-5 font-bold text-white'>{candidateName}</p>
+								<div className='mt-1 flex items-center gap-2'>
+									<span className='truncate text-xs text-cyan-100/90'>{candidateTitle}</span>
+									<span className='shrink-0 rounded-full bg-cyan-100 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-wide text-[#045d7a]'>
+										Candidat
+									</span>
+								</div>
 							</div>
-						</div>
 						</div>
 					</div>
 
@@ -1552,16 +1624,11 @@ function DashboardCand() {
 												<button
 													type='button'
 													onClick={() => setSelectedView(item.key)}
-													className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-[16px] font-medium transition-all ${isActive ? 'bg-white/15 text-white ring-1 ring-white/30 backdrop-blur-sm shadow-[0_10px_24px_rgba(0,0,0,0.2)]' : 'text-[#d2e7ff] hover:bg-white/10 hover:text-white'}`}
+													className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-[16px] font-medium transition-all ${isActive ? 'bg-gradient-to-r from-[#00b8d9] to-[#1d88ff] text-white shadow-[0_8px_20px_rgba(0,184,217,0.35)]' : 'text-[#d2e7ff] hover:bg-white/10 hover:text-white'}`}
 												>
 													<div className='flex items-center gap-2'>
 														<span>{item.label}</span>
-														{item.badge ? (
-															<span className='ml-2 inline-flex items-center gap-1 rounded-full bg-emerald-200/20 px-2 py-[2px] text-[10px] font-semibold text-emerald-50'>
-																<span className='h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-200' />
-																{item.badge}
-															</span>
-														) : null}
+														{item.badge ? <span className='ml-2 inline-flex items-center rounded-full bg-white/15 px-2 py-[2px] text-[10px] font-semibold text-[#e6f5ff]'>{item.badge}</span> : null}
 													</div>
 													{typeof item.count === 'number' ? (
 														<span className='rounded-full bg-white/15 px-2 py-[2px] text-[12px] font-semibold text-[#e6f5ff]'>{item.count}</span>
@@ -1619,9 +1686,9 @@ function DashboardCand() {
 									type='button'
 									onClick={handleRefreshPage}
 									className='candidate-dashboard__ghost-btn rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50'
-									title='Rafraîchir la page'
+									title='Actualiser la section visible'
 								>
-									Rafraîchir
+									Actualiser
 								</button>
 								<button
 									type='button'
@@ -1629,13 +1696,6 @@ function DashboardCand() {
 									className='candidate-dashboard__primary-btn rounded-xl bg-[#001d3e] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-95'
 								>
 									Mes candidatures
-								</button>
-								<button
-									type='button'
-									onClick={() => setSelectedView('entretiens')}
-									className='candidate-dashboard__ghost-btn rounded-xl border border-cyan-300 bg-cyan-50 px-4 py-2 text-sm font-semibold text-[#0a5f88] transition hover:bg-cyan-100'
-								>
-									Mes entretiens
 								</button>
 							</div>
 						</div>

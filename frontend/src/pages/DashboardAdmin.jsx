@@ -8,6 +8,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { assets } from '../assets/assets'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
@@ -248,18 +249,24 @@ export default function DashboardAdmin() {
       <div className="flex h-full w-full">
 
         {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-        <aside className="w-[240px] shrink-0 bg-gradient-to-b from-[#051a3d] via-[#072a56] to-[#083d69] px-4 py-6 text-white flex flex-col overflow-y-auto h-full">
-          <div className="mb-6 px-2">
-            <p className="text-2xl font-black tracking-tight text-white">AIR</p>
-            <p className="mt-0.5 text-[10px] uppercase tracking-[0.2em] text-cyan-200/50">Console Admin</p>
+        <aside className="w-[286px] shrink-0 bg-gradient-to-b from-[#051a3d] via-[#072a56] to-[#083d69] px-4 py-6 text-white flex flex-col overflow-y-auto h-full">
+          <div className="mb-2 flex items-center justify-center px-2">
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="cursor-pointer"
+              aria-label="Aller a l accueil"
+            >
+              <img src={assets.logo} alt="AIR logo" className="h-28 w-auto object-contain" />
+            </button>
           </div>
 
           <div className="mb-6 flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#00d4ff] to-[#1f7bff] text-sm font-black">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#00d4ff] to-[#1f7bff] text-base font-black">
               {(admin.firstName?.[0] || 'A').toUpperCase()}
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-bold text-white">{adminName}</p>
+              <p className="truncate text-[19px] leading-5 font-bold text-white">{adminName}</p>
               <span className="rounded-full bg-cyan-100 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-wide text-[#045d7a]">
                 {admin.role || 'admin'}
               </span>
@@ -267,10 +274,10 @@ export default function DashboardAdmin() {
           </div>
 
           <div className="space-y-1">
-            <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-[0.15em] text-cyan-200/40">Navigation</p>
+            <p className="mb-2 px-2 text-[12px] font-bold uppercase tracking-[0.12em] text-cyan-200/60">Navigation</p>
             {VIEWS.map(v => (
               <button key={v} onClick={() => setView(v)}
-                className={`flex w-full items-center rounded-xl px-3 py-2.5 text-left text-[15px] font-medium transition-all ${
+                className={`flex w-full items-center rounded-xl px-3 py-2.5 text-left text-[16px] font-medium transition-all ${
                   view === v
                     ? 'bg-gradient-to-r from-[#00b8d9] to-[#1d88ff] text-white shadow-[0_8px_20px_rgba(0,184,217,0.35)]'
                     : 'text-[#d2e7ff] hover:bg-white/10 hover:text-white'
@@ -283,7 +290,7 @@ export default function DashboardAdmin() {
           <div className="mt-10 border-t border-cyan-200/20 pt-5">
             <button
               onClick={() => { localStorage.removeItem('airAdmin'); navigate('/connexion') }}
-              className="flex w-full items-center rounded-xl px-3 py-2.5 text-[15px] font-medium text-[#d2e7ff] hover:bg-white/10 hover:text-white"
+              className="flex w-full items-center rounded-xl px-3 py-2.5 text-[16px] font-medium text-[#d2e7ff] hover:bg-white/10 hover:text-white"
             >
               Déconnexion
             </button>

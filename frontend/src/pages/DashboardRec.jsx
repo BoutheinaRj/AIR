@@ -1928,21 +1928,23 @@ function DashboardRec() {
 						</button>
 					</div>
 
-					<div className='flex items-center gap-3'>
-						{recruiterAvatar ? (
-							<img src={recruiterAvatar} alt='Profil recruteur' className='h-12 w-12 rounded-full object-cover ring-2 ring-cyan-300/40' />
-						) : (
-							<div className='flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-[#00d4ff] to-[#1f7bff] text-base font-bold'>
-								{recruiterInitials}
-							</div>
-						)}
-						<div className='min-w-0'>
-							<p className='truncate text-[19px] leading-5 font-bold text-white'>{recruiterFullName}</p>
-							<div className='mt-1 flex items-center gap-2'>
-								<span className='truncate text-xs text-cyan-100/90'>Recruteur - {recruiter.company}</span>
-								<span className='shrink-0 rounded-full bg-cyan-100 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-wide text-[#045d7a]'>
-									Recruteur
-								</span>
+					<div className='mb-6 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 shadow-[0_12px_28px_rgba(0,0,0,0.2),0_0_0_1px_rgba(255,255,255,0.03),0_0_18px_rgba(6,182,212,0.28)]'>
+						<div className='flex items-center gap-3'>
+							{recruiterAvatar ? (
+								<img src={recruiterAvatar} alt='Profil recruteur' className='h-12 w-12 rounded-full object-cover ring-2 ring-cyan-300/40' />
+							) : (
+								<div className='flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-[#00d4ff] to-[#1f7bff] text-base font-bold'>
+									{recruiterInitials}
+								</div>
+							)}
+							<div className='min-w-0'>
+								<p className='truncate text-[19px] leading-5 font-bold text-white'>{recruiterFullName}</p>
+								<div className='mt-1 flex items-center gap-2'>
+									<span className='truncate text-xs text-cyan-100/90'>Recruteur - {recruiter.company}</span>
+									<span className='shrink-0 rounded-full bg-cyan-100 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-wide text-[#045d7a]'>
+										Recruteur
+									</span>
+								</div>
 							</div>
 						</div>
 					</div>
