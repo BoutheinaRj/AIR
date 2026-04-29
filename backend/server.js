@@ -4890,39 +4890,49 @@ app.get('/api/interviews/candidate/:candidateId/reports', async (req, res) => {
 });
 
 // ─── Feedback moderation ──────────────────────────────────────────────────────
-function moderateText(text) {
-  if (!text || !String(text).trim()) return { flagged: false }
+async function moderateText(text) {
+  if (!text?.trim()) return { flagged: false }
 
-  const BAD_WORDS = [
-    // French
-    'merde', 'putain', 'connard', 'connasse', 'salope', 'enculé', 'enculer',
-    'fdp', 'fils de pute', 'ta gueule', 'va te faire', 'nique', 'niquer',
-    'batard', 'bâtard', 'conne', 'pute', 'bordel', 'chier',
-    'encule', 'branler', 'branleur', 'couille',
-    // Arabic transliterated
-    'kess', '7mar', 'hmar', 'zebi', 'zeb',
-    'sharmouta', 'charmuta', 'khara', 'khra', '5ra',
-    // English
-    'fuck', 'shit', 'bitch', 'asshole', 'bastard', 'cunt', 'dick',
-    'pussy', 'motherfucker', 'bullshit', 'shitty','fck'
-  ]
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+        max_tokens: 5,
+        temperature: 0,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a content moderator. Reply only with YES or NO, nothing else.',
+          },
+          {
+            role: 'user',
+            content: `Does this review contain inappropriate content such as insults, hate speech, profanity, or offensive language in any language (French, English, Arabic, or other)? Reply YES or NO only.\n\nReview: "${text}"`,
+          },
+        ],
+      }),
+    })
 
-  const normalized = String(text)
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+    const data = await response.json()
+    console.log('[groq moderation raw]', JSON.stringify(data?.choices?.[0]?.message))
 
-  const found = BAD_WORDS.find(word => {
-    const pattern = new RegExp(
-      `(^|\\s|\\b)${word.replace(/\s+/g, '\\s+')}(\\s|\\b|$)`, 'i'
-    )
-    return pattern.test(normalized)
-  })
+    if (data?.error) {
+      console.error('[groq moderation error]', data.error.message)
+      return { flagged: false }
+    }
 
-  return found ? { flagged: true } : { flagged: false }
+    const answer = data?.choices?.[0]?.message?.content?.trim().toUpperCase()
+    console.log('[groq moderation answer]', answer)
+    return { flagged: answer === 'YES' }
+
+  } catch (err) {
+    console.error('[groq moderation]', err.message)
+    return { flagged: false }
+  }
 }
 
 async function sendModerationEmail(userId, userRole) {
@@ -4968,7 +4978,7 @@ app.post('/api/app-feedback', async (req, res) => {
 
     // ── AI moderation ────────────────────────────────────────────────────────
     if (comment) {
-      const moderationResult = moderateText(comment)
+      const moderationResult = await moderateText(comment)
       if (moderationResult.flagged) {
         await sendModerationEmail(userId, userRole)
         return res.status(400).json({
@@ -5427,6 +5437,7 @@ app.get('/api/dm/conversations', async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(String(userId))) {
       return res.status(400).json({ success: false, message: 'userId invalide.' });
     }
+    
 
     const userKey = `${userRole}:${userId}`;
     const userRoleNormalized = String(userRole).trim();
@@ -5436,6 +5447,7 @@ app.get('/api/dm/conversations', async (req, res) => {
 
     // Find all distinct conversations this user is part of
     const conversations = await DirectMessage.aggregate([
+      
       {
         $match: {
           conversationKey: userKeyRegex,
@@ -5465,6 +5477,7 @@ app.get('/api/dm/conversations', async (req, res) => {
         },
       },
       { $sort: { 'lastMessage.createdAt': -1 } },
+      
     ]);
 
     // Parse the other participant's identity from the conversationKey
