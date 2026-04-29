@@ -738,21 +738,156 @@ export default function DashboardAdmin() {
               <div className="mt-6 space-y-5">
                 {statsLoading ? <p className="text-sm text-[#4f7191]">Chargement des statistiques...</p> : stats ? (
                   <>
-                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                      <StatCard label="Recruteurs"      value={stats.totalRecruiters} />
-                      <StatCard label="Candidats"       value={stats.totalCandidates} />
-                      <StatCard label="Offres publiées" value={stats.totalOffers} />
-                      <StatCard label="Candidatures"    value={stats.totalCandidacies} sub={`${stats.scoredCandidacies} scorées SBERT`} />
-                    </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <StatCard label="Candidatures / 14 jours"
-                        value={stats.trendValues?.reduce((a, b) => a + b, 0) ?? 0}
-                        sub="Total sur les 14 derniers jours" trend={stats.trendValues}
-                      />
-                      <StatCard label="Note moyenne app"
-                        value={stats.avgRating ? `${stats.avgRating}/5` : '—'}
-                        sub={`${stats.feedbackCount} avis déposés`}
-                      />
+                    <div className="grid gap-4 xl:grid-cols-2">
+                      <div className="rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-base font-bold text-[#0d355b]">Vue globale (global)</p>
+                          <span className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-[10px] font-black text-[#0a5f88]">
+                            30 jours
+                          </span>
+                        </div>
+
+                        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                          <div className="rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#f0fbff] to-[#dff7ff] p-4">
+                            <p className="text-[11px] font-black tracking-[0.12em] text-[#0d355b]">ACTIVITÉ</p>
+                            <div className="mt-3 space-y-3">
+                              <div>
+                                <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                  <span>Taux scoring</span>
+                                  <span className="text-[#0d355b]">
+                                    {Number(stats.totalCandidacies || 0) > 0
+                                      ? Math.round((Number(stats.scoredCandidacies || 0) / Number(stats.totalCandidacies || 0)) * 100)
+                                      : 0}%
+                                  </span>
+                                </div>
+                                <div className="mt-1 h-2 rounded-full bg-cyan-100">
+                                  <div className="h-full rounded-full bg-[#0a5f88]" style={{ width: `${Number(stats.totalCandidacies || 0) > 0 ? Math.round((Number(stats.scoredCandidacies || 0) / Number(stats.totalCandidacies || 0)) * 100) : 0}%` }} />
+                                </div>
+                              </div>
+
+                              <div>
+                                <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                  <span>Taux entretien</span>
+                                  <span className="text-[#0d355b]">{Math.round(candidatePipelineStats.interviewRate || 0)}%</span>
+                                </div>
+                                <div className="mt-1 h-2 rounded-full bg-cyan-100">
+                                  <div className="h-full rounded-full bg-[#06d5e0]" style={{ width: `${candidatePipelineStats.interviewRate || 0}%` }} />
+                                </div>
+                              </div>
+
+                              <div>
+                                <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                  <span>Conversion recruteur</span>
+                                  <span className="text-[#0d355b]">{recruiterConversion}%</span>
+                                </div>
+                                <div className="mt-1 h-2 rounded-full bg-cyan-100">
+                                  <div className="h-full rounded-full bg-gradient-to-r from-[#06d5e0] to-[#0a5f88]" style={{ width: `${recruiterConversion}%` }} />
+                                </div>
+                              </div>
+
+                              <div className="rounded-xl border border-cyan-100 bg-white px-3 py-3">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-[11px] font-black tracking-[0.12em] text-slate-500">HEURES FORTES</p>
+                                  <span className="text-[11px] font-semibold text-[#0a5f88]">{candidatePipelineStats.topHourLabel}</span>
+                                </div>
+                                {candidatePipelineStats.topHoursPipeline.length === 0 ? (
+                                  <p className="text-xs font-semibold text-slate-500">Aucune donnée disponible.</p>
+                                ) : (
+                                  <div className="mt-2 space-y-2">
+                                    {candidatePipelineStats.topHoursPipeline.slice(0, 3).map((h) => (
+                                      <div key={h.label}>
+                                        <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600">
+                                          <span>{h.label}</span>
+                                          <span className="text-[#0d355b]">{h.count}</span>
+                                        </div>
+                                        <div className="mt-1 h-2 rounded-full bg-cyan-100">
+                                          <div className="h-full rounded-full bg-gradient-to-r from-[#06d5e0] to-[#0a5f88]" style={{ width: `${h.progress}%` }} />
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#edf4ff] to-[#dfeeff] p-4">
+                            <p className="text-[11px] font-black tracking-[0.12em] text-[#0d355b]">PIPELINE GLOBAL</p>
+                            <div className="mt-2 flex items-center justify-between gap-2">
+                              <span className="rounded-full border border-blue-200 bg-white px-2 py-1 text-[10px] font-black text-[#0a5f88]">
+                                Note {stats.avgRating ? `${stats.avgRating}/5` : '—'}
+                              </span>
+                              <span className="text-xs font-semibold text-slate-600">{stats.feedbackCount} avis déposés</span>
+                            </div>
+
+                            <div className="mt-4 space-y-3">
+                              <div>
+                                <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                  <span>RECRUTEURS</span>
+                                  <span className="text-[#0d355b]">{stats.totalRecruiters}</span>
+                                </div>
+                                <div className="mt-1 h-2 rounded-full bg-blue-100">
+                                  <div className="h-full rounded-full bg-[#0f2742]" style={{ width: '100%' }} />
+                                </div>
+                              </div>
+
+                              <div>
+                                <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                  <span>CANDIDATS</span>
+                                  <span className="text-[#0d355b]">{stats.totalCandidates}</span>
+                                </div>
+                                <div className="mt-1 h-2 rounded-full bg-blue-100">
+                                  <div className="h-full rounded-full bg-[#06d5e0]" style={{ width: '100%' }} />
+                                </div>
+                              </div>
+
+                              <div>
+                                <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                  <span>OFFRES PUBLIÉES</span>
+                                  <span className="text-[#0d355b]">{stats.totalOffers}</span>
+                                </div>
+                                <div className="mt-1 h-2 rounded-full bg-blue-100">
+                                  <div className="h-full rounded-full bg-[#0a5f88]" style={{ width: '100%' }} />
+                                </div>
+                              </div>
+
+                              <div className="rounded-xl border border-slate-100 bg-white px-3 py-3">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-[11px] font-black tracking-[0.12em] text-slate-500">CANDIDATURES À TRAITER</p>
+                                  <p className="text-sm font-bold text-[#0d355b]">
+                                    {Math.max(0, Number(stats.totalCandidacies || 0) - Number(stats.scoredCandidacies || 0))}
+                                  </p>
+                                </div>
+                                <p className="mt-1 text-xs text-slate-500">sur {stats.totalCandidacies} candidatures</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-[#d7e9f8] bg-white p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-base font-bold text-[#0d355b]">Synthèse globale</p>
+                          <span className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-[10px] font-black text-[#0a5f88]">
+                            Live
+                          </span>
+                        </div>
+
+                        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-2">
+                          <StatCard label="Taux scoring" value={`${Number(stats.totalCandidacies || 0) > 0 ? Math.round((Number(stats.scoredCandidacies || 0) / Number(stats.totalCandidacies || 0)) * 100) : 0}%`} sub={`${stats.scoredCandidacies} scorées`} />
+                          <StatCard label="Taux entretien" value={`${Math.round(candidatePipelineStats.interviewRate || 0)}%`} sub="entretiens sur candidatures" />
+                          <StatCard label="Conversion recruteur" value={`${recruiterConversion}%`} sub="candidatures → entretiens" />
+                          <StatCard label="Note app" value={stats.avgRating ? `${stats.avgRating}/5` : '—'} sub={`${stats.feedbackCount} avis déposés`} />
+                        </div>
+
+                        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[#5b7f9d]">Organisation</p>
+                            <p className="text-sm font-black text-[#0d355b]">Mêmes blocs que le dashboard candidat</p>
+                          </div>
+                          <p className="mt-1 text-xs text-[#4f7191]">Une lecture par couches, avec des cartes compactes, des taux visibles et des sous-blocs cohérents.</p>
+                        </div>
+                      </div>
                     </div>
 
                     {/* Bar chart */}
