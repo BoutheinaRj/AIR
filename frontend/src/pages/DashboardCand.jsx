@@ -1663,7 +1663,7 @@ function DashboardCand() {
 				<aside className='candidate-dashboard__sidebar w-[286px] shrink-0 bg-gradient-to-b from-[#051a3d] via-[#072a56] to-[#083d69] px-4 py-6 text-white'>
 					<div className='mb-2 flex items-center justify-center px-2'>
 						<button type='button' onClick={() => navigate('/')} className='cursor-pointer' aria-label="Aller a l'accueil">
-							<img src={assets.logo} alt='AIR logo' className='h-28 w-auto object-contain' />
+							<img src={assets.logo} alt='AIR logo' className='h-32 w-auto object-contain' />
 						</button>
 					</div>
 

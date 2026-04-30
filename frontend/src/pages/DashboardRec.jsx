@@ -1941,7 +1941,7 @@ function DashboardRec() {
 							className='cursor-pointer'
 							aria-label='Aller a l accueil'
 						>
-							<img src={assets.logo} alt='ForsaTech logo' className='h-28 w-auto object-contain' />
+							<img src={assets.logo} alt='ForsaTech logo' className='h-32 w-auto object-contain' />
 						</button>
 					</div>
 
