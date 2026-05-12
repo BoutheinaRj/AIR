@@ -1899,7 +1899,7 @@ function DashboardRec() {
 	}
 
 	const handleMenuClick = (itemKey) => {
-		if (itemKey === 'dashboard' || itemKey === 'offers' || itemKey === 'interviews' || itemKey === 'candidates' || itemKey === 'company' || itemKey === 'settings') {
+		if (itemKey === 'dashboard' || itemKey === 'offers' || itemKey === 'interviews' || itemKey === 'candidates' || itemKey === 'company' || itemKey === 'settings' || itemKey === 'ai') {
 			setSelectedView(itemKey)
 			setOfferError('')
 			setOfferMessage('')
@@ -1916,8 +1916,6 @@ function DashboardRec() {
 			}
 			return
 		}
-		setOfferMessage('')
-		setOfferError('Cette section sera activee ensuite.')
 	}
 
 	const handleLogout = () => {
@@ -3477,6 +3475,12 @@ function DashboardRec() {
 										{appFeedbackSaving ? 'Envoi...' : 'Envoyer'}
 									</button>
 								</form>
+							</div>
+						) : selectedView === 'ai' ? (
+							<div className='mt-6 rounded-2xl border border-cyan-100 bg-[#fbfdff] p-8 shadow-[0_0_0_1px_rgba(14,165,233,0.22),0_10px_24px_rgba(14,165,233,0.12)]'>
+								<div className='-mx-8 -mt-8 mb-6 h-1 bg-gradient-to-r from-[#06b6d4] via-[#0ea5e9] to-[#1d4ed8]' />
+								<h2 className='text-xl font-black text-[#0d355b]'>Recommandations IA</h2>
+								<p className='mt-2 text-sm text-[#4f7191]'>Cette section sera disponible prochainement.</p>
 							</div>
 						) : null}
 					</div>

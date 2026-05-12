@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import logo21 from '../../dist/logo21.png'
+import logo21 from '../assets/logo21.png'
 
 const isHttpUrl = (value) => /^https?:\/\//i.test(String(value || '').trim())
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
